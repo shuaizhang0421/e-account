@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# Real ledger exports - do not upload private data
+elliot-ledger-backup-*.json
+elliot-ledger-transactions-*.csv
+e-account-backup-*.json
+e-account-transactions-*.csv
+*.backup.json
+*.transactions.csv
+
+# Development-only icon sources / candidates
+ElliotLedger.iconset/
+icons/icon-candidates.png
+
+# Temporary files
+*.tmp
+*.log

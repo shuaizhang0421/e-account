@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#4aa3ff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="E-Account">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icons/icon-180.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="./icons/icon-32.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
+  <title>E-Account</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="主导航">
+      <div class="brand">
+        <div class="brand-mark">账</div>
+        <div>
+          <h1>E-Account</h1>
+          <p>清爽个人收支工作台</p>
+        </div>
+      </div>
+      <nav class="nav-list">
+        <button class="nav-item active" data-view="dashboard" type="button">总览</button>
+        <button class="nav-item" data-view="transactions" type="button">流水</button>
+        <button class="nav-item" data-view="accounts" type="button">账户</button>
+        <button class="nav-item" data-view="categories" type="button">分类</button>
+        <button class="nav-item" data-view="plans" type="button">计划</button>
+        <button class="nav-item" data-view="backup" type="button">备份</button>
+      </nav>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="primary-action" id="quickAddBtn" type="button">+ 新增记账</button>
+          <label class="field compact-field">
+            <span>月份</span>
+            <input id="monthPicker" type="month">
+          </label>
+        </div>
+        <label class="search-box">
+          <span>搜索</span>
+          <input id="globalSearch" type="search" placeholder="分类、账户、备注">
+        </label>
+      </header>
+
+      <section class="notice" id="notice" role="status" aria-live="polite"></section>
+
+      <section class="view active" id="view-dashboard">
+        <div class="page-heading">
+          <div>
+            <h2>总览</h2>
+            <p id="dashboardSubtitle">当前月份的收支、计划和近期流水</p>
+          </div>
+        </div>
+
+        <div class="metric-grid" id="summaryMetrics"></div>
+
+        <div class="content-grid">
+          <section class="panel wide-panel">
+            <div class="panel-header">
+              <h3>月度趋势</h3>
+              <span>按日期汇总</span>
+            </div>
+            <canvas id="trendChart" width="900" height="320" aria-label="月度趋势图"></canvas>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>分类排行</h3>
+              <span>支出 Top 8</span>
+            </div>
+            <div class="rank-list" id="categoryRank"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>账户余额</h3>
+              <span>按币种分别显示</span>
+            </div>
+            <div class="account-list" id="accountBalances"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>近期计划支出</h3>
+              <span>未来 30 天</span>
+            </div>
+            <div class="plan-list" id="upcomingPlans"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>最近流水</h3>
+              <span>最新 5 条</span>
+            </div>
+            <div class="recent-list" id="recentTransactions"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>分类占比</h3>
+              <span>本月 CNY 支出</span>
+            </div>
+            <canvas id="categoryShareChart" width="420" height="220" aria-label="分类占比图"></canvas>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>最近 7 天</h3>
+              <span>CNY 支出</span>
+            </div>
+            <canvas id="weekChart" width="420" height="220" aria-label="最近七天支出趋势"></canvas>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>月度对比</h3>
+              <span>本月 vs 上月</span>
+            </div>
+            <div class="compare-list" id="monthCompare"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="view-transactions">
+        <div class="page-heading split-heading">
+          <div>
+            <h2>流水</h2>
+            <p>新增、筛选、编辑和删除收入支出记录</p>
+          </div>
+          <button class="secondary-action" id="clearFiltersBtn" type="button">清除筛选</button>
+        </div>
+
+        <section class="panel form-panel accent-panel">
+          <div class="quick-strip" id="templateChips"></div>
+          <form id="transactionForm" class="form-grid">
+            <input id="transactionId" type="hidden">
+            <label class="field">
+              <span>类型</span>
+              <div class="segmented-control" role="group" aria-label="流水类型">
+                <input id="typeExpense" name="transactionTypeChoice" type="radio" value="expense" checked>
+                <label for="typeExpense">支出</label>
+                <input id="typeIncome" name="transactionTypeChoice" type="radio" value="income">
+                <label for="typeIncome">收入</label>
+              </div>
+              <select id="transactionType" class="sr-only" required>
+                <option value="expense">支出</option>
+                <option value="income">收入</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>日期</span>
+              <input id="transactionDate" type="date" required>
+            </label>
+            <label class="field">
+              <span>金额</span>
+              <input id="transactionAmount" type="number" min="0.01" step="0.01" placeholder="0.00" required>
+            </label>
+            <label class="field">
+              <span>账户</span>
+              <select id="transactionAccount" required></select>
+            </label>
+            <label class="field">
+              <span>分类</span>
+              <select id="transactionCategory" required></select>
+            </label>
+            <label class="field note-field">
+              <span>备注</span>
+              <input id="transactionNote" type="text" maxlength="80" placeholder="选择“其他”时必须填写" list="noteSuggestions">
+              <datalist id="noteSuggestions"></datalist>
+            </label>
+            <div class="form-actions">
+              <button class="primary-action" type="submit">保存流水</button>
+              <button class="ghost-action" id="resetTransactionBtn" type="button">重置</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="filters">
+            <label class="field">
+              <span>起始日期</span>
+              <input id="filterStart" type="date">
+            </label>
+            <label class="field">
+              <span>结束日期</span>
+              <input id="filterEnd" type="date">
+            </label>
+            <label class="field">
+              <span>类型</span>
+              <select id="filterType">
+                <option value="all">全部</option>
+                <option value="expense">支出</option>
+                <option value="income">收入</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>分类</span>
+              <select id="filterCategory"></select>
+            </label>
+            <label class="field">
+              <span>账户</span>
+              <select id="filterAccount"></select>
+            </label>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>日期</th>
+                  <th>类型</th>
+                  <th>分类</th>
+                  <th>账户</th>
+                  <th class="num">金额</th>
+                  <th>备注</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="transactionRows"></tbody>
+            </table>
+          </div>
+          <div class="mobile-card-list" id="transactionCards"></div>
+        </section>
+      </section>
+
+      <section class="view" id="view-accounts">
+        <div class="page-heading">
+          <div>
+            <h2>账户</h2>
+            <p>账户余额按账户币种独立计算，不进行自动汇率折算</p>
+          </div>
+        </div>
+        <section class="panel form-panel accent-panel">
+          <form id="accountForm" class="form-grid short-grid">
+            <input id="accountId" type="hidden">
+            <label class="field">
+              <span>账户名称</span>
+              <input id="accountName" type="text" maxlength="30" placeholder="例如：招商银行卡" required>
+            </label>
+            <label class="field">
+              <span>账户类型</span>
+              <select id="accountType" required>
+                <option value="cash">现金</option>
+                <option value="debit">储蓄卡</option>
+                <option value="credit">信用卡</option>
+                <option value="wallet">电子钱包</option>
+                <option value="other">其他账户</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>币种</span>
+              <select id="accountCurrency" required></select>
+            </label>
+            <label class="field">
+              <span>初始余额</span>
+              <input id="accountInitial" type="number" step="0.01" placeholder="0.00" required>
+            </label>
+            <div class="form-actions">
+              <button class="primary-action" type="submit">保存账户</button>
+              <button class="ghost-action" id="resetAccountBtn" type="button">重置</button>
+            </div>
+          </form>
+        </section>
+        <section class="panel">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>账户</th>
+                  <th>类型</th>
+                  <th>币种</th>
+                  <th class="num">初始余额</th>
+                  <th class="num">当前余额</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="accountRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="view" id="view-categories">
+        <div class="page-heading">
+          <div>
+            <h2>分类</h2>
+            <p>分类按收入和支出分别管理</p>
+          </div>
+        </div>
+        <section class="panel form-panel accent-panel">
+          <form id="categoryForm" class="form-grid short-grid">
+            <input id="categoryId" type="hidden">
+            <label class="field">
+              <span>分类名称</span>
+              <input id="categoryName" type="text" maxlength="20" placeholder="例如：咖啡" required>
+            </label>
+            <label class="field">
+              <span>类型</span>
+              <select id="categoryType" required>
+                <option value="expense">支出</option>
+                <option value="income">收入</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>颜色</span>
+              <input id="categoryColor" type="color" value="#2563eb" required>
+            </label>
+            <div class="form-actions">
+              <button class="primary-action" type="submit">保存分类</button>
+              <button class="ghost-action" id="resetCategoryBtn" type="button">重置</button>
+            </div>
+          </form>
+        </section>
+        <section class="panel">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>分类</th>
+                  <th>类型</th>
+                  <th>颜色</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="categoryRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="view" id="view-plans">
+        <div class="page-heading">
+          <div>
+            <h2>计划</h2>
+            <p>记录下个月必要支出、固定订阅、续费和到期事项</p>
+          </div>
+        </div>
+        <section class="panel form-panel accent-panel">
+          <form id="planForm" class="form-grid">
+            <input id="planId" type="hidden">
+            <label class="field">
+              <span>计划名称</span>
+              <input id="planName" type="text" maxlength="40" placeholder="例如：视频会员续费" required>
+            </label>
+            <label class="field">
+              <span>金额</span>
+              <input id="planAmount" type="number" min="0.01" step="0.01" placeholder="0.00" required>
+            </label>
+            <label class="field">
+              <span>币种</span>
+              <select id="planCurrency" required></select>
+            </label>
+            <label class="field">
+              <span>账户</span>
+              <select id="planAccount" required></select>
+            </label>
+            <label class="field">
+              <span>分类</span>
+              <select id="planCategory" required></select>
+            </label>
+            <label class="field">
+              <span>预计日期</span>
+              <input id="planDate" type="date" required>
+            </label>
+            <label class="field">
+              <span>重复周期</span>
+              <select id="planRepeat" required>
+                <option value="none">不重复</option>
+                <option value="monthly">每月</option>
+                <option value="quarterly">每季度</option>
+                <option value="yearly">每年</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>状态</span>
+              <select id="planStatus" required>
+                <option value="pending">待处理</option>
+                <option value="paid">已支付</option>
+                <option value="skipped">已跳过</option>
+              </select>
+            </label>
+            <label class="field note-field">
+              <span>备注</span>
+              <input id="planNote" type="text" maxlength="80" placeholder="可选">
+            </label>
+            <div class="form-actions">
+              <button class="primary-action" type="submit">保存计划</button>
+              <button class="ghost-action" id="resetPlanBtn" type="button">重置</button>
+            </div>
+          </form>
+        </section>
+        <section class="panel">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>预计日期</th>
+                  <th>名称</th>
+                  <th>分类</th>
+                  <th>账户</th>
+                  <th>周期</th>
+                  <th>状态</th>
+                  <th class="num">金额</th>
+                  <th>备注</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="planRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="view" id="view-backup">
+        <div class="page-heading">
+          <div>
+            <h2>备份</h2>
+            <p>JSON 用于完整恢复，CSV 用于查看流水明细</p>
+          </div>
+        </div>
+        <div class="backup-grid">
+          <section class="panel">
+            <div class="panel-header">
+              <h3>导出</h3>
+              <span>保存当前数据</span>
+            </div>
+            <div class="stack-actions">
+              <button class="primary-action" id="exportJsonBtn" type="button">导出 JSON 备份</button>
+              <button class="secondary-action" id="exportCsvBtn" type="button">导出 CSV 流水</button>
+            </div>
+          </section>
+          <section class="panel">
+            <div class="panel-header">
+              <h3>导入</h3>
+              <span>校验通过后才覆盖</span>
+            </div>
+            <label class="file-drop">
+              <input id="importJsonInput" type="file" accept="application/json,.json">
+              <span>选择 JSON 备份文件</span>
+            </label>
+          </section>
+          <section class="panel danger-panel">
+            <div class="panel-header">
+              <h3>清空</h3>
+              <span>仅清除本地浏览器数据</span>
+            </div>
+            <button class="danger-action" id="resetAllBtn" type="button">恢复默认数据</button>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    if ("serviceWorker" in navigator && ["http:", "https:"].includes(location.protocol)) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("./service-worker.js"));
+    }
+  </script>
+  <script src="./app.js"></script>
+</body>
+</html>

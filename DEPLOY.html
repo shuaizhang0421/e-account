@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>E-Account 部署教程</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; color: #1d2939; background: #f4f9ff; line-height: 1.7; }
+    main { max-width: 860px; margin: 0 auto; padding: 38px 20px 56px; }
+    h1 { font-size: 30px; margin: 0 0 18px; }
+    h2 { margin-top: 30px; border-top: 1px solid #d8e8f4; padding-top: 22px; color: #247ad6; }
+    p { margin: 10px 0; }
+    code { background: #e7f4ff; padding: 2px 6px; border-radius: 6px; }
+    .step { padding: 10px 12px; background: white; border: 1px solid #d8e8f4; border-radius: 8px; }
+  </style>
+</head>
+<body><main><h1>E-Account：部署到 iPhone 使用</h1><p>这个项目已经准备好 PWA 文件：`manifest.webmanifest`、`service-worker.js` 和 `icons/`。iPhone 不能直接从 ChatGPT 安装网页应用，需要先把这个文件夹部署到 HTTPS 地址。</p><h2>方式一：GitHub Pages</h2><p class="step">新建一个 GitHub 仓库，例如 `e-account`。</p><p class="step">上传本文件夹内的所有文件：`index.html`、`styles.css`、`app.js`、`manifest.webmanifest`、`service-worker.js`、`icons/`。</p><p class="step">在 GitHub 仓库页面进入 `Settings` → `Pages`。</p><p class="step">`Build and deployment` 选择 `Deploy from a branch`。</p><p class="step">Branch 选择 `main` / `/root`，保存。</p><p class="step">等待 GitHub 给出 `https://你的用户名.github.io/e-account/`。</p><h2>方式二：Netlify</h2><p class="step">打开 https://app.netlify.com/drop 。</p><p class="step">把整个 `Elliot的记账APP` 文件夹拖进去。</p><p class="step">Netlify 会生成一个 HTTPS 网址。</p><h2>添加到 iPhone 主屏幕</h2><p class="step">在 iPhone 上用 Safari 打开部署后的 HTTPS 网址。</p><p class="step">点击底部分享按钮。</p><p class="step">选择“添加到主屏幕”。</p><p class="step">名称建议填：`E-Account`。</p><p class="step">以后从主屏幕图标打开，会以独立 App 窗口运行。</p><h2>数据说明</h2><p>数据仍保存在当前设备浏览器本地。Mac 和 iPhone 不会自动同步。换设备或重装前，请在“备份”页面导出 JSON，再到另一台设备导入。</p></main></body>
+</html>

@@ -1,15 +1,13 @@
-const CACHE_NAME = "e-account-v2";
+const CACHE_NAME = "e-account-v10";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
   "./manifest.webmanifest",
-  "./icons/icon-180.png",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./apple-touch-icon.png",
-  "./assets/visuals/avatar-abstract.png",
   "./assets/visuals/flow-bg.jpg"
 ];
 
@@ -26,12 +24,23 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET") return;
+  const url = new URL(event.request.url);
+  if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request).then((response) => {
-      const copy = response.clone();
-      caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-      return response;
-    }).catch(() => caches.match("./index.html")))
+    (async () => {
+      const cached = await caches.match(event.request);
+      if (cached) return cached;
+      try {
+        const response = await fetch(event.request);
+        if (response.ok && response.type === "basic") {
+          const cache = await caches.open(CACHE_NAME);
+          await cache.put(event.request, response.clone());
+        }
+        return response;
+      } catch (_error) {
+        if (event.request.mode === "navigate") return caches.match("./index.html");
+        return Response.error();
+      }
+    })()
   );
 });

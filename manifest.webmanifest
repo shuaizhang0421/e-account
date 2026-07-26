@@ -1,13 +1,15 @@
 {
   "name": "E-Account",
   "short_name": "E-Account",
+  "id": "./index.html",
   "description": "清爽个人收支、计划支出和本地备份工具。",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#f4f9ff",
-  "theme_color": "#4aa3ff",
-  "orientation": "portrait-primary",
+  "theme_color": "#2d78d4",
+  "categories": ["finance", "productivity"],
   "icons": [
     {
       "src": "./icons/icon-192.png",

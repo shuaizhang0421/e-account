@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const STORAGE_KEY = "local-ledger-v1";
+  const STORAGE_KEY = "e-account:ledger:v1";
   const BASE_CURRENCY = "CNY";
   const CURRENCIES = ["CNY", "USD", "EUR", "JPY", "HKD", "GBP", "AUD", "CAD", "SGD"];
   const ACCOUNT_TYPES = { cash: "现金", debit: "储蓄卡", credit: "信用卡", wallet: "电子钱包", other: "其他账户" };

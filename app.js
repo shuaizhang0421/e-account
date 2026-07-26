@@ -4,1344 +4,215 @@
   const STORAGE_KEY = "local-ledger-v1";
   const BASE_CURRENCY = "CNY";
   const CURRENCIES = ["CNY", "USD", "EUR", "JPY", "HKD", "GBP", "AUD", "CAD", "SGD"];
-  const ACCOUNT_TYPES = {
-    cash: "现金",
-    debit: "储蓄卡",
-    credit: "信用卡",
-    wallet: "电子钱包",
-    other: "其他账户"
-  };
-  const PLAN_REPEATS = {
-    none: "不重复",
-    monthly: "每月",
-    quarterly: "每季度",
-    yearly: "每年"
-  };
-  const PLAN_STATUSES = {
-    pending: "待处理",
-    paid: "已支付",
-    skipped: "已跳过"
-  };
-  const DEFAULT_TEMPLATES = [
-    { id: "tpl-breakfast", name: "早餐", type: "expense", amount: 12, categoryName: "餐饮", note: "早餐" },
-    { id: "tpl-coffee", name: "咖啡", type: "expense", amount: 18, categoryName: "餐饮", note: "咖啡" },
-    { id: "tpl-traffic", name: "交通", type: "expense", amount: 5, categoryName: "交通", note: "通勤" },
-    { id: "tpl-study", name: "学习", type: "expense", amount: 30, categoryName: "学习", note: "资料/课程" },
-    { id: "tpl-subscription", name: "会员续费", type: "expense", amount: 28, categoryName: "其他", note: "订阅续费" }
+  const ACCOUNT_TYPES = { cash: "现金", debit: "储蓄卡", credit: "信用卡", wallet: "电子钱包", other: "其他账户" };
+  const ACCOUNT_ICONS = { cash: "现", debit: "储", credit: "信", wallet: "包", other: "账" };
+  const PLAN_REPEATS = { none: "不重复", monthly: "每月", quarterly: "每季度", yearly: "每年" };
+  const PLAN_STATUSES = { pending: "待处理", paid: "已支付", skipped: "已跳过" };
+  const NAV = [["ledger", "账本", "i-book"], ["reports", "报表", "i-chart"], ["record", "记一笔", "i-plus"], ["assets", "资产", "i-wallet"], ["me", "我的", "i-user"]];
+  const DEFAULT_CATEGORIES = [
+    ["餐饮", "expense", "#ef5f79", "餐"], ["交通", "expense", "#f59e42", "行"], ["购物", "expense", "#8b7cf6", "购"], ["学习", "expense", "#308df5", "学"], ["医疗", "expense", "#fb7185", "医"], ["住房", "expense", "#35d3a6", "住"], ["娱乐", "expense", "#22c7d8", "乐"], ["其他", "expense", "#94a3b8", "其"],
+    ["工资", "income", "#1aa979", "薪"], ["奖学金", "income", "#22c7d8", "奖"], ["兼职", "income", "#84cc16", "兼"], ["理财", "income", "#308df5", "利"], ["其他", "income", "#8b7cf6", "其"]
+  ];
+  const DEFAULT_QUICK_ACTIONS = [
+    { id: "qa-food", name: "餐饮", type: "expense", amount: "", categoryName: "餐饮", note: "" },
+    { id: "qa-traffic", name: "交通", type: "expense", amount: "", categoryName: "交通", note: "" },
+    { id: "qa-shopping", name: "购物", type: "expense", amount: "", categoryName: "购物", note: "" },
+    { id: "qa-salary", name: "工资", type: "income", amount: "", categoryName: "工资", note: "" },
+    { id: "qa-credit", name: "还信用卡", type: "transfer", amount: "", categoryName: "其他", note: "信用卡还款" }
   ];
 
-  const defaultData = {
-    version: 1,
-    accounts: [
-      { id: uid(), name: "现金", type: "cash", currency: "CNY", initialBalance: 0 },
-      { id: uid(), name: "储蓄卡", type: "debit", currency: "CNY", initialBalance: 0 },
-      { id: uid(), name: "信用卡", type: "credit", currency: "CNY", initialBalance: 0 }
-    ],
-    categories: [
-      { id: uid(), name: "餐饮", type: "expense", color: "#f97373" },
-      { id: uid(), name: "交通", type: "expense", color: "#f59e0b" },
-      { id: uid(), name: "购物", type: "expense", color: "#a78bfa" },
-      { id: uid(), name: "学习", type: "expense", color: "#38bdf8" },
-      { id: uid(), name: "医疗", type: "expense", color: "#fb7185" },
-      { id: uid(), name: "住房", type: "expense", color: "#2dd4bf" },
-      { id: uid(), name: "其他", type: "expense", color: "#94a3b8" },
-      { id: uid(), name: "工资", type: "income", color: "#34d399" },
-      { id: uid(), name: "奖学金", type: "income", color: "#22d3ee" },
-      { id: uid(), name: "兼职", type: "income", color: "#a3e635" },
-      { id: uid(), name: "其他", type: "income", color: "#c084fc" }
-    ],
-    budgets: [],
-    plans: [],
-    templates: DEFAULT_TEMPLATES.map((template) => ({ ...template })),
-    transactions: []
-  };
-
   let state = loadState();
-  let currentView = "dashboard";
+  let view = "ledger";
+  let selectedMonth = toMonth(new Date());
+  let search = "";
+  let filters = { type: "all", category: "all", account: "all" };
+  let draft = newDraft("expense");
+  let editing = null;
+  const app = document.getElementById("app");
 
-  const $ = (selector) => document.querySelector(selector);
-  const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+  render();
 
-  const els = {
-    notice: $("#notice"),
-    monthPicker: $("#monthPicker"),
-    globalSearch: $("#globalSearch"),
-    quickAddBtn: $("#quickAddBtn"),
-    summaryMetrics: $("#summaryMetrics"),
-    categoryRank: $("#categoryRank"),
-    accountBalances: $("#accountBalances"),
-    upcomingPlans: $("#upcomingPlans"),
-    recentTransactions: $("#recentTransactions"),
-    categoryShareChart: $("#categoryShareChart"),
-    weekChart: $("#weekChart"),
-    monthCompare: $("#monthCompare"),
-    trendChart: $("#trendChart"),
-    transactionForm: $("#transactionForm"),
-    transactionId: $("#transactionId"),
-    transactionType: $("#transactionType"),
-    typeExpense: $("#typeExpense"),
-    typeIncome: $("#typeIncome"),
-    transactionDate: $("#transactionDate"),
-    transactionAmount: $("#transactionAmount"),
-    transactionAccount: $("#transactionAccount"),
-    transactionCategory: $("#transactionCategory"),
-    transactionNote: $("#transactionNote"),
-    noteSuggestions: $("#noteSuggestions"),
-    templateChips: $("#templateChips"),
-    transactionRows: $("#transactionRows"),
-    transactionCards: $("#transactionCards"),
-    filterStart: $("#filterStart"),
-    filterEnd: $("#filterEnd"),
-    filterType: $("#filterType"),
-    filterCategory: $("#filterCategory"),
-    filterAccount: $("#filterAccount"),
-    clearFiltersBtn: $("#clearFiltersBtn"),
-    accountForm: $("#accountForm"),
-    accountId: $("#accountId"),
-    accountName: $("#accountName"),
-    accountType: $("#accountType"),
-    accountCurrency: $("#accountCurrency"),
-    accountInitial: $("#accountInitial"),
-    accountRows: $("#accountRows"),
-    categoryForm: $("#categoryForm"),
-    categoryId: $("#categoryId"),
-    categoryName: $("#categoryName"),
-    categoryType: $("#categoryType"),
-    categoryColor: $("#categoryColor"),
-    categoryRows: $("#categoryRows"),
-    planForm: $("#planForm"),
-    planId: $("#planId"),
-    planName: $("#planName"),
-    planAmount: $("#planAmount"),
-    planCurrency: $("#planCurrency"),
-    planAccount: $("#planAccount"),
-    planCategory: $("#planCategory"),
-    planDate: $("#planDate"),
-    planRepeat: $("#planRepeat"),
-    planStatus: $("#planStatus"),
-    planNote: $("#planNote"),
-    planRows: $("#planRows"),
-    exportJsonBtn: $("#exportJsonBtn"),
-    exportCsvBtn: $("#exportCsvBtn"),
-    importJsonInput: $("#importJsonInput"),
-    resetAllBtn: $("#resetAllBtn")
-  };
-
-  init();
-
-  function init() {
-    const today = new Date();
-    const month = toMonth(today);
-    els.monthPicker.value = month;
-    els.transactionDate.value = toDate(today);
-    els.planDate.value = toDate(today);
-
-    bindEvents();
-    populateStaticSelects();
-    refreshAll();
+  function render() {
+    app.innerHTML = `
+      <aside class="side">
+        <div class="brand"><div class="brand-logo">E</div><div><h1>E-Account</h1><p>自由清爽的个人账本</p></div></div>
+        <nav class="nav">${NAV.map(([id, label, icon]) => `<button class="${view === id ? "active" : ""}" data-view="${id}" type="button">${svg(icon)}<span>${label}</span></button>`).join("")}</nav>
+        <div class="side-card"><strong>本地隐私</strong><small>账单数据保存在当前浏览器。更新网页不会清空数据，换域名需导出 JSON 迁移。</small></div>
+      </aside>
+      <main class="workspace">${hero()}${viewTemplate()}</main>
+      <div class="notice" id="notice"></div>`;
+    bindStaticEvents();
+    drawCharts();
   }
 
-  function bindEvents() {
-    $$(".nav-item").forEach((button) => {
-      button.addEventListener("click", () => setView(button.dataset.view));
-    });
-
-    els.quickAddBtn.addEventListener("click", () => {
-      setView("transactions");
-      els.transactionAmount.focus();
-    });
-
-    [
-      els.monthPicker,
-      els.globalSearch,
-      els.filterStart,
-      els.filterEnd,
-      els.filterType,
-      els.filterCategory,
-      els.filterAccount,
-      els.transactionType
-    ].forEach((input) => input.addEventListener("input", refreshAll));
-
-    $$("input[name='transactionTypeChoice']").forEach((input) => {
-      input.addEventListener("change", () => {
-        els.transactionType.value = input.value;
-        refreshAll();
-      });
-    });
-
-    els.transactionForm.addEventListener("submit", saveTransaction);
-    $("#resetTransactionBtn").addEventListener("click", resetTransactionForm);
-    els.clearFiltersBtn.addEventListener("click", clearFilters);
-    els.templateChips.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-template-id]");
-      if (button) applyTemplate(button.dataset.templateId);
-    });
-
-    els.accountForm.addEventListener("submit", saveAccount);
-    $("#resetAccountBtn").addEventListener("click", resetAccountForm);
-
-    els.categoryForm.addEventListener("submit", saveCategory);
-    $("#resetCategoryBtn").addEventListener("click", resetCategoryForm);
-
-    els.planForm.addEventListener("submit", savePlan);
-    $("#resetPlanBtn").addEventListener("click", resetPlanForm);
-
-    els.exportJsonBtn.addEventListener("click", exportJson);
-    els.exportCsvBtn.addEventListener("click", exportCsv);
-    els.importJsonInput.addEventListener("change", importJson);
-    els.resetAllBtn.addEventListener("click", resetAllData);
-
-    window.addEventListener("resize", drawTrendChart);
+  function hero() {
+    const title = { ledger: "账本", reports: "报表", record: "记一笔", assets: "资产", me: "我的" }[view];
+    const desc = { ledger: "查看流水、筛选记录、回看最近的每一笔钱。", reports: "用占比、趋势和对比看清消费结构。", record: "图标化快速记账，支持本地语音解析草稿。", assets: "按资产、负债和信用卡应还理解自己的净值。", me: "管理账户、分类、提醒、备份和个人化元素。" }[view];
+    return `<section class="hero"><div><h2>${title}</h2><p>${desc}</p><div class="top-actions"><button class="btn primary" data-view="record" type="button">${svg("i-plus")}记一笔</button><label class="field"><span>月份</span><input id="month" type="month" value="${selectedMonth}"></label><label class="field search"><span>搜索</span><input id="search" type="search" placeholder="分类、账户、备注" value="${escapeAttr(search)}"></label></div></div><img class="hero-avatar" src="./assets/visuals/avatar-abstract.png" alt="E-Account 抽象头像"></section>`;
   }
 
-  function setView(view) {
-    currentView = view;
-    $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
-    $$(".view").forEach((section) => section.classList.toggle("active", section.id === `view-${view}`));
-    refreshAll();
+  function viewTemplate() { return ({ ledger: ledgerView, reports: reportsView, record: recordView, assets: assetsView, me: meView }[view])(); }
+
+  function ledgerView() {
+    const list = filteredTransactions();
+    return `<section class="view active"><div class="toolbar">${selectField("类型", "filter-type", [["all", "全部"], ["expense", "支出"], ["income", "收入"], ["transfer", "还款/转账"]], filters.type)}${selectField("分类", "filter-category", [["all", "全部分类"], ...state.categories.map((c) => [c.id, c.name])], filters.category)}${selectField("账户", "filter-account", [["all", "全部账户"], ...state.accounts.map((a) => [a.id, a.name])], filters.account)}<button class="btn" data-action="clear-filters" type="button">清除筛选</button></div><section class="panel solid"><div class="panel-header"><h3>流水明细</h3><span>${list.length} 条</span></div><div class="table-wrap">${transactionsTable(list)}</div><div class="mobile-cards">${list.map(transactionCard).join("") || empty("没有符合条件的流水")}</div></section></section>`;
   }
 
-  function refreshAll() {
-    populateDynamicSelects();
-    renderDashboard();
-    renderTransactions();
-    renderAccounts();
-    renderCategories();
-    renderPlans();
-    renderTemplates();
-    renderNoteSuggestions();
+  function reportsView() {
+    const items = monthTransactions(selectedMonth).filter((t) => t.type !== "transfer");
+    const s = summarize(items).CNY || { income: 0, expense: 0 };
+    const prev = summarize(monthTransactions(previousMonth(selectedMonth))).CNY || { income: 0, expense: 0 };
+    const balance = s.income - s.expense;
+    const daily = s.expense / Math.max(1, selectedMonth === toMonth(new Date()) ? new Date().getDate() : daysInMonth(selectedMonth));
+    return `<section class="view active grid"><div class="grid metrics">${metric("本月收入", money(s.income), "人民币账户，不折算外币")}${metric("本月支出", money(s.expense), biggestExpenseHint(items))}${metric("本月结余", money(balance), balance >= 0 ? "收支为正" : "需要关注现金流")}${metric("日均支出", money(daily), "按当前月份计算")}</div><div class="grid two">${chartPanel("分类占比", "消费结构", "shareChart")}<section class="panel"><div class="panel-header"><h3>消费排行</h3><span>Top 8</span></div><div class="list">${categoryRank(items)}</div></section></div><div class="grid two">${chartPanel("月度趋势", "收入与支出", "trendChart")}${chartPanel("最近 7 天", "支出节奏", "weekChart")}</div><section class="panel"><div class="panel-header"><h3>本月 vs 上月</h3><span>CNY</span></div><div class="grid three">${compareMetric("收入", s.income, prev.income, true)}${compareMetric("支出", s.expense, prev.expense, false)}${compareMetric("结余", s.income - s.expense, prev.income - prev.expense, true)}</div></section></section>`;
   }
 
-  function populateStaticSelects() {
-    els.accountCurrency.innerHTML = CURRENCIES.map((currency) => `<option value="${currency}">${currency}</option>`).join("");
+  function recordView() {
+    const cats = state.categories.filter((c) => c.type === (draft.type === "income" ? "income" : "expense"));
+    const account = accountById(draft.accountId);
+    return `<section class="view active record-layout"><section class="panel solid"><div class="panel-header"><h3>${editing ? "编辑流水" : "记一笔"}</h3><span>选择都有图标，少用下拉框</span></div><div class="form-stack"><div class="icon-grid">${choice("支出", "expense", draft.type === "expense", "支", "日常消费")}${choice("收入", "income", draft.type === "income", "收", "工资、奖金")}${choice("还信用卡", "transfer", draft.type === "transfer", "还", "不计入消费")}</div><label class="field amount-input"><span>金额</span><input id="draft-amount" type="number" step="0.01" min="0.01" value="${escapeAttr(draft.amount)}" placeholder="0.00"></label><label class="field"><span>日期</span><input id="draft-date" type="date" value="${draft.date}"></label><div><div class="panel-header"><h3>${draft.type === "transfer" ? "从哪个账户还款" : "账户"}</h3><span>${account ? `${ACCOUNT_TYPES[account.type]} · ${account.currency}` : "选择账户"}</span></div><div class="icon-grid">${state.accounts.filter((a) => draft.type !== "transfer" || a.type !== "credit").map(accountChoice).join("")}</div></div>${draft.type === "transfer" ? creditTargetBlock() : `<div><div class="panel-header"><h3>分类</h3><span>用于报表与消费结构</span></div><div class="icon-grid">${cats.map(categoryChoice).join("")}</div></div>`}<div class="voice-box"><label class="field"><span>备注 / 本地语音文本</span><input id="draft-note" type="text" maxlength="80" value="${escapeAttr(draft.note)}" placeholder="例如：今天午饭 28 支付宝"></label><button class="btn" data-action="voice" type="button">${svg("i-mic")}语音</button><button class="btn" data-action="parse-note" type="button">解析</button></div><div class="actions"><button class="btn ghost" data-action="reset-draft" type="button">重置</button><button class="btn primary" data-action="save-transaction" type="button">${editing ? "保存修改" : "保存流水"}</button></div></div></section><aside class="panel"><div class="panel-header"><h3>快捷入口</h3><span>无固定金额</span></div><div class="list">${state.quickActions.map(quickActionButton).join("")}</div><div class="panel-header" style="margin-top:16px"><h3>最近流水</h3><span>5 条</span></div><div class="list">${state.transactions.slice().sort(byDateDesc).slice(0, 5).map(simpleTransaction).join("") || empty("暂无流水")}</div></aside></section>`;
   }
 
-  function populateDynamicSelects() {
-    const selectedTransactionAccount = els.transactionAccount.value;
-    const selectedTransactionCategory = els.transactionCategory.value;
-    const selectedPlanAccount = els.planAccount.value;
-    const selectedPlanCategory = els.planCategory.value;
-    const selectedPlanCurrency = els.planCurrency.value || BASE_CURRENCY;
-    const accountsOptions = state.accounts.map((account) => {
-      return `<option value="${escapeHtml(account.id)}">${escapeHtml(account.name)} · ${accountTypeLabel(account.type)} · ${account.currency}</option>`;
-    }).join("");
-    const expenseCategories = state.categories.filter((category) => category.type === "expense");
-    const visibleCategories = state.categories.filter((category) => category.type === els.transactionType.value);
-
-    els.transactionAccount.innerHTML = accountsOptions;
-    els.transactionCategory.innerHTML = visibleCategories.map(optionCategory).join("");
-    els.filterAccount.innerHTML = `<option value="all">全部账户</option>${accountsOptions}`;
-    els.filterCategory.innerHTML = `<option value="all">全部分类</option>${state.categories.map(optionCategory).join("")}`;
-    els.planAccount.innerHTML = accountsOptions;
-    els.planCategory.innerHTML = expenseCategories.map(optionCategory).join("");
-    els.planCurrency.innerHTML = CURRENCIES.map((currency) => `<option value="${currency}">${currency}</option>`).join("");
-    els.transactionAccount.value = selectedTransactionAccount;
-    els.transactionCategory.value = selectedTransactionCategory;
-    els.planAccount.value = selectedPlanAccount;
-    els.planCategory.value = selectedPlanCategory;
-    els.planCurrency.value = selectedPlanCurrency;
-
-    if (!state.accounts.some((account) => account.id === els.transactionAccount.value)) {
-      els.transactionAccount.value = getPreferredAccountId();
-    }
-    if (!visibleCategories.some((category) => category.id === els.transactionCategory.value)) {
-      els.transactionCategory.value = visibleCategories[0]?.id || "";
-    }
-    if (!state.accounts.some((account) => account.id === els.planAccount.value)) {
-      els.planAccount.value = state.accounts[0]?.id || "";
-    }
-    if (!expenseCategories.some((category) => category.id === els.planCategory.value)) {
-      els.planCategory.value = expenseCategories[0]?.id || "";
-    }
+  function assetsView() {
+    const snapshot = assetSnapshot();
+    return `<section class="view active grid"><div class="grid three"><article class="asset-card"><span>资产</span><strong>${formatCurrencyMap(snapshot.assets)}</strong><small>现金、储蓄卡、钱包等正资产</small></article><article class="asset-card debt-card"><span>负债</span><strong>${formatCurrencyMap(snapshot.debts)}</strong><small>信用卡当前应还</small></article><article class="asset-card"><span>净资产</span><strong>${formatCurrencyMap(snapshot.net)}</strong><small>按币种分别计算，不自动折算</small></article></div><div class="grid two"><section class="panel solid"><div class="panel-header"><h3>账户资产</h3><span>添加账户后自动更新</span></div><div class="list">${state.accounts.map(accountAssetItem).join("")}</div></section><section class="panel solid"><div class="panel-header"><h3>信用卡提醒</h3><span>应还与还款日</span></div><div class="list">${creditReminderItems()}</div></section></div></section>`;
   }
 
-  function optionCategory(category) {
-    return `<option value="${escapeHtml(category.id)}">${escapeHtml(category.name)}</option>`;
+  function meView() {
+    return `<section class="view active grid"><section class="panel solid profile-grid"><img src="./assets/visuals/avatar-abstract.png" alt="抽象个人头像"><div><h3>E-Account</h3><p>清爽高级、自由感的个人财务空间。分类负责报表结构，账户负责资产和负债，备份负责跨设备迁移。</p><div class="top-actions"><button class="btn" data-action="export-json" type="button">导出 JSON</button><button class="btn" data-action="export-csv" type="button">导出 CSV</button><label class="btn"><input id="import-json" type="file" accept="application/json" hidden>导入 JSON</label></div></div></section><div class="manage-grid">${accountsManager()}${categoriesManager()}</div><div class="manage-grid">${plansManager()}${quickManager()}</div><section class="panel"><div class="panel-header"><h3>维护</h3><span>谨慎操作</span></div><button class="btn danger" data-action="reset-all" type="button">恢复默认数据</button></section></section>`;
   }
 
-  function renderDashboard() {
-    const month = els.monthPicker.value;
-    $("#dashboardSubtitle").textContent = `${month} 的收支、计划和近期流水`;
-    const monthTransactions = getTransactionsForMonth(month);
-    const byCurrency = summarizeByCurrency(monthTransactions);
+  function accountsManager() { return `<section class="panel"><div class="panel-header"><h3>账户管理</h3><span>支持信用卡</span></div><div class="form-grid"><label class="field"><span>名称</span><input id="account-name" placeholder="例如 招商信用卡"></label>${selectField("类型", "account-type", Object.entries(ACCOUNT_TYPES), "debit")}${selectField("币种", "account-currency", CURRENCIES.map((c) => [c, c]), BASE_CURRENCY)}<label class="field"><span>初始余额/欠款</span><input id="account-initial" type="number" step="0.01" value="0"></label><label class="field"><span>账单日</span><input id="account-bill-day" type="number" min="1" max="31" placeholder="信用卡可填"></label><label class="field"><span>还款日</span><input id="account-due-day" type="number" min="1" max="31" placeholder="信用卡可填"></label><button class="btn primary full" data-action="add-account" type="button">新增账户</button></div><div class="list" style="margin-top:12px">${state.accounts.map(accountManageItem).join("")}</div></section>`; }
+  function categoriesManager() { return `<section class="panel"><div class="panel-header"><h3>分类管理</h3><span>决定报表结构</span></div><div class="form-grid"><label class="field"><span>名称</span><input id="category-name" placeholder="例如 宠物"></label>${selectField("类型", "category-type", [["expense", "支出"], ["income", "收入"]], "expense")}<label class="field"><span>图标字</span><input id="category-icon" maxlength="2" placeholder="宠"></label><label class="field"><span>颜色</span><input id="category-color" type="color" value="#308df5"></label><button class="btn primary full" data-action="add-category" type="button">新增分类</button></div><div class="list" style="margin-top:12px">${state.categories.map(categoryManageItem).join("")}</div></section>`; }
+  function plansManager() { return `<section class="panel"><div class="panel-header"><h3>提醒</h3><span>计划支出与还信用卡</span></div><div class="form-grid"><label class="field"><span>名称</span><input id="plan-name" placeholder="例如 房租 / 信用卡还款"></label><label class="field"><span>金额</span><input id="plan-amount" type="number" step="0.01" placeholder="0.00"></label><label class="field"><span>日期</span><input id="plan-date" type="date" value="${toDate(new Date())}"></label>${selectField("账户", "plan-account", state.accounts.map((a) => [a.id, a.name]), state.accounts[0]?.id || "")}${selectField("分类", "plan-category", state.categories.filter((c) => c.type === "expense").map((c) => [c.id, c.name]), expenseCategory()?.id || "")}${selectField("重复", "plan-repeat", Object.entries(PLAN_REPEATS), "none")}<label class="field full"><span>备注</span><input id="plan-note" placeholder="可写账单说明"></label><button class="btn primary full" data-action="add-plan" type="button">新增提醒</button></div><div class="list" style="margin-top:12px">${state.plans.map(planItem).join("") || empty("暂无提醒")}</div></section>`; }
+  function quickManager() { return `<section class="panel"><div class="panel-header"><h3>快捷入口</h3><span>替代固定金额模板</span></div><div class="form-grid"><label class="field"><span>名称</span><input id="quick-name" placeholder="例如 通勤"></label>${selectField("类型", "quick-type", [["expense", "支出"], ["income", "收入"], ["transfer", "还款"]], "expense")}<label class="field"><span>默认金额</span><input id="quick-amount" type="number" step="0.01" placeholder="可留空"></label><label class="field"><span>备注</span><input id="quick-note" placeholder="可留空"></label><button class="btn primary full" data-action="add-quick" type="button">新增快捷入口</button></div><div class="list" style="margin-top:12px">${state.quickActions.map(quickManageItem).join("")}</div></section>`; }
 
-    const cnyIncome = byCurrency.CNY?.income || 0;
-    const cnyExpense = byCurrency.CNY?.expense || 0;
-    const cnyBalance = cnyIncome - cnyExpense;
-    const today = new Date();
-    const averageDays = month === toMonth(today) ? today.getDate() : daysInMonth(month);
-    const dailyAverage = cnyExpense / Math.max(1, averageDays);
-    const biggestExpense = monthTransactions
-      .filter((transaction) => transaction.type === "expense" && getAccount(transaction.accountId)?.currency === BASE_CURRENCY)
-      .sort((a, b) => b.amount - a.amount)[0];
-    const biggestHint = biggestExpense
-      ? `最大单笔：${formatMoney(biggestExpense.amount, BASE_CURRENCY)}`
-      : "暂无人民币支出";
-
-    els.summaryMetrics.innerHTML = [
-      metric("本月收入 CNY", formatMoney(cnyIncome, "CNY"), "仅统计人民币账户"),
-      metric("本月支出 CNY", formatMoney(cnyExpense, "CNY"), biggestHint),
-      metric("本月结余 CNY", formatMoney(cnyBalance, "CNY"), cnyBalance >= 0 ? "收支为正" : "支出高于收入"),
-      metric("本月日均支出", formatMoney(dailyAverage, "CNY"), month === toMonth(today) ? "按今天日期估算" : "按整月天数计算")
-    ].join("");
-
-    renderCategoryRank(monthTransactions);
-    renderAccountBalances();
-    renderUpcomingPlans();
-    renderRecentTransactions();
-    renderMonthCompare(month);
-    drawTrendChart();
-    drawCategoryShareChart(monthTransactions);
-    drawWeekChart();
+  function bindStaticEvents() {
+    app.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => { view = button.dataset.view; render(); }));
+    document.getElementById("month")?.addEventListener("input", (e) => { selectedMonth = e.target.value || toMonth(new Date()); render(); });
+    document.getElementById("search")?.addEventListener("input", (e) => { search = e.target.value; render(); });
+    document.getElementById("filter-type")?.addEventListener("input", (e) => { filters.type = e.target.value; render(); });
+    document.getElementById("filter-category")?.addEventListener("input", (e) => { filters.category = e.target.value; render(); });
+    document.getElementById("filter-account")?.addEventListener("input", (e) => { filters.account = e.target.value; render(); });
+    document.getElementById("import-json")?.addEventListener("change", importJson);
   }
 
-  function metric(label, value, hint) {
-    return `<article class="metric"><span>${label}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(hint)}</small></article>`;
-  }
-
-  function renderCategoryRank(transactions) {
-    const expenses = transactions.filter((transaction) => transaction.type === "expense");
-    const totals = {};
-    expenses.forEach((transaction) => {
-      const account = getAccount(transaction.accountId);
-      const category = getCategory(transaction.categoryId);
-      const key = `${transaction.categoryId}:${account?.currency || ""}`;
-      if (!totals[key]) {
-        totals[key] = { categoryName: category?.name || "未分类", currency: account?.currency || "", amount: 0 };
-      }
-      totals[key].amount += transaction.amount;
-    });
-
-    const items = Object.values(totals).sort((a, b) => b.amount - a.amount).slice(0, 8);
-    const max = Math.max(...items.map((item) => item.amount), 1);
-    els.categoryRank.innerHTML = items.length ? items.map((item) => `
-      <div class="rank-item">
-        <div class="row-between"><strong>${escapeHtml(item.categoryName)}</strong><span>${formatMoney(item.amount, item.currency)}</span></div>
-        <div class="bar"><span style="width:${Math.min(100, item.amount / max * 100)}%"></span></div>
-      </div>
-    `).join("") : `<div class="empty-state">当前月份暂无支出。</div>`;
-  }
-
-  function renderAccountBalances() {
-    const balances = calculateAccountBalances();
-    els.accountBalances.innerHTML = state.accounts.length ? state.accounts.map((account) => `
-      <div class="account-item">
-        <div class="row-between"><strong>${escapeHtml(account.name)}</strong><span>${formatMoney(balances[account.id] || 0, account.currency)}</span></div>
-        <small>${accountTypeLabel(account.type)} · ${account.currency}</small>
-        <div class="bar"><span style="width:100%"></span></div>
-      </div>
-    `).join("") : `<div class="empty-state">还没有账户。</div>`;
-  }
-
-  function renderUpcomingPlans() {
-    const today = startOfDay(new Date());
-    const limit = addDays(today, 30);
-    const plans = state.plans
-      .filter((plan) => plan.status === "pending" && parseLocalDate(plan.date) >= today && parseLocalDate(plan.date) <= limit)
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .slice(0, 6);
-
-    els.upcomingPlans.innerHTML = plans.length ? plans.map((plan) => {
-      const account = getAccount(plan.accountId);
-      return `
-        <div class="plan-item">
-          <div class="row-between">
-            <strong>${escapeHtml(plan.name)}</strong>
-            <span>${formatMoney(plan.amount, plan.currency || account?.currency || BASE_CURRENCY)}</span>
-          </div>
-          <small>${plan.date} · ${escapeHtml(getCategory(plan.categoryId)?.name || "未分类")} · ${repeatLabel(plan.repeat)}</small>
-        </div>
-      `;
-    }).join("") : `<div class="empty-state">未来 30 天暂无待处理计划。</div>`;
-  }
-
-  function renderMonthCompare(month) {
-    const prev = previousMonth(month);
-    const current = summarizeByCurrency(getTransactionsForMonth(month)).CNY || { income: 0, expense: 0 };
-    const last = summarizeByCurrency(getTransactionsForMonth(prev)).CNY || { income: 0, expense: 0 };
-    const rows = [
-      { label: "收入", current: current.income, prev: last.income, positiveGood: true },
-      { label: "支出", current: current.expense, prev: last.expense, positiveGood: false },
-      { label: "结余", current: current.income - current.expense, prev: last.income - last.expense, positiveGood: true }
-    ];
-    els.monthCompare.innerHTML = rows.map((row) => {
-      const diff = row.current - row.prev;
-      const cls = diff === 0 ? "" : (diff > 0 === row.positiveGood ? "income-text" : "expense-text");
-      return `<div class="compare-item"><span>${row.label}</span><strong>${formatMoney(row.current, BASE_CURRENCY)}</strong><small class="${cls}">${diff >= 0 ? "+" : ""}${formatMoney(diff, BASE_CURRENCY)}</small></div>`;
-    }).join("");
-  }
-
-  function renderRecentTransactions() {
-    const items = state.transactions
-      .slice()
-      .sort((a, b) => b.date.localeCompare(a.date))
-      .slice(0, 5);
-    els.recentTransactions.innerHTML = items.length ? items.map((transaction) => {
-      const account = getAccount(transaction.accountId);
-      const category = getCategory(transaction.categoryId);
-      const signed = transaction.type === "income" ? "+" : "-";
-      const amountClass = transaction.type === "income" ? "income-text" : "expense-text";
-      return `
-        <div class="recent-item">
-          <div>
-            <strong>${escapeHtml(category?.name || "未分类")}</strong>
-            <small>${transaction.date} · ${escapeHtml(account?.name || "未知账户")}</small>
-          </div>
-          <span class="${amountClass}">${signed}${formatMoney(transaction.amount, account?.currency || BASE_CURRENCY)}</span>
-        </div>
-      `;
-    }).join("") : `<div class="empty-state">还没有流水。</div>`;
-  }
-
-  function renderTransactions() {
-    const filtered = getFilteredTransactions();
-    const rows = filtered.map((transaction) => {
-      const account = getAccount(transaction.accountId);
-      const category = getCategory(transaction.categoryId);
-      const amountClass = transaction.type === "income" ? "income-text" : "expense-text";
-      const signed = transaction.type === "income" ? "+" : "-";
-      return `
-        <tr>
-          <td>${transaction.date}</td>
-          <td>${typePill(transaction.type)}</td>
-          <td>${escapeHtml(category?.name || "未分类")}</td>
-          <td>${escapeHtml(account?.name || "未知账户")}<br><small>${accountTypeLabel(account?.type)} · ${account?.currency || BASE_CURRENCY}</small></td>
-          <td class="num ${amountClass}">${signed}${formatMoney(transaction.amount, account?.currency || BASE_CURRENCY)}</td>
-          <td>${escapeHtml(transaction.note || "")}</td>
-          <td>${rowActions("transaction", transaction.id)}</td>
-        </tr>
-      `;
-    }).join("");
-    els.transactionRows.innerHTML = rows || emptyRow(7, "没有符合条件的流水。");
-    els.transactionCards.innerHTML = filtered.length ? filtered.map(transactionCard).join("") : `<div class="empty-state">没有符合条件的流水。</div>`;
-  }
-
-  function transactionCard(transaction) {
-    const account = getAccount(transaction.accountId);
-    const category = getCategory(transaction.categoryId);
-    const signed = transaction.type === "income" ? "+" : "-";
-    const amountClass = transaction.type === "income" ? "income-text" : "expense-text";
-    return `
-      <article class="transaction-card">
-        <div>
-          <strong>${escapeHtml(category?.name || "未分类")}</strong>
-          <small>${transaction.date} · ${escapeHtml(account?.name || "未知账户")}</small>
-          ${transaction.note ? `<small>${escapeHtml(transaction.note)}</small>` : ""}
-        </div>
-        <div class="transaction-card-side">
-          <span class="${amountClass}">${signed}${formatMoney(transaction.amount, account?.currency || BASE_CURRENCY)}</span>
-          ${rowActions("transaction", transaction.id)}
-        </div>
-      </article>
-    `;
-  }
-
-  function renderAccounts() {
-    const balances = calculateAccountBalances();
-    els.accountRows.innerHTML = state.accounts.map((account) => `
-      <tr>
-        <td>${escapeHtml(account.name)}</td>
-        <td>${accountTypePill(account.type)}</td>
-        <td>${account.currency}</td>
-        <td class="num">${formatMoney(account.initialBalance, account.currency)}</td>
-        <td class="num">${formatMoney(balances[account.id] || 0, account.currency)}</td>
-        <td>${rowActions("account", account.id)}</td>
-      </tr>
-    `).join("") || emptyRow(6, "还没有账户。");
-  }
-
-  function renderCategories() {
-    els.categoryRows.innerHTML = state.categories.map((category) => `
-      <tr>
-        <td>${escapeHtml(category.name)}</td>
-        <td>${typePill(category.type)}</td>
-        <td><span class="color-pill"><span class="swatch" style="background:${category.color}"></span>${category.color}</span></td>
-        <td>${rowActions("category", category.id)}</td>
-      </tr>
-    `).join("") || emptyRow(4, "还没有分类。");
-  }
-
-  function renderPlans() {
-    els.planRows.innerHTML = state.plans
-      .slice()
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .map((plan) => {
-        const account = getAccount(plan.accountId);
-        const currency = plan.currency || account?.currency || BASE_CURRENCY;
-        return `
-          <tr>
-            <td>${plan.date}</td>
-            <td>${escapeHtml(plan.name)}</td>
-            <td>${escapeHtml(getCategory(plan.categoryId)?.name || "未分类")}</td>
-            <td>${escapeHtml(account?.name || "未指定账户")}</td>
-            <td>${repeatLabel(plan.repeat)}</td>
-            <td>${planStatusSelect(plan)}</td>
-            <td class="num">${formatMoney(plan.amount, currency)}</td>
-            <td>${escapeHtml(plan.note || "")}</td>
-            <td>${planActions(plan)}</td>
-          </tr>
-        `;
-      }).join("") || emptyRow(9, "还没有计划支出。");
-  }
-
-  function planActions(plan) {
-    const payButton = plan.status === "pending"
-      ? `<button class="icon-button" type="button" title="记为流水" data-action="pay-plan" data-type="plan" data-id="${plan.id}">记账</button>`
-      : "";
-    return `<div class="row-actions">${payButton}<button class="icon-button" type="button" title="编辑" data-action="edit" data-type="plan" data-id="${plan.id}">编辑</button><button class="icon-button" type="button" title="删除" data-action="delete" data-type="plan" data-id="${plan.id}">删除</button></div>`;
-  }
-
-  function rowActions(type, id) {
-    return `
-      <div class="row-actions">
-        <button class="icon-button" type="button" title="编辑" data-action="edit" data-type="${type}" data-id="${id}">编辑</button>
-        <button class="icon-button" type="button" title="删除" data-action="delete" data-type="${type}" data-id="${id}">删除</button>
-      </div>
-    `;
-  }
-
-  document.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-action]");
-    if (!button) return;
-    const { action, type, id } = button.dataset;
-    if (action === "edit") editItem(type, id);
-    if (action === "delete") deleteItem(type, id);
-    if (action === "pay-plan") payPlan(id);
+  app.addEventListener("click", (event) => {
+    const el = event.target.closest("[data-action],[data-choice],[data-account],[data-category],[data-quick],[data-credit-target]");
+    if (!el) return;
+    if (el.dataset.choice) setDraftType(el.dataset.choice);
+    if (el.dataset.account) { draft.accountId = el.dataset.account; render(); }
+    if (el.dataset.category) { draft.categoryId = el.dataset.category; render(); }
+    if (el.dataset.creditTarget) { draft.targetAccountId = el.dataset.creditTarget; render(); }
+    if (el.dataset.quick) applyQuick(el.dataset.quick);
+    const action = el.dataset.action;
+    if (!action) return;
+    syncDraftFromInputs();
+    const actions = { "save-transaction": saveTransaction, "reset-draft": resetDraft, "parse-note": parseDraftNote, voice: startVoice, "clear-filters": clearFilters, "edit-transaction": () => editTransaction(el.dataset.id), "delete-transaction": () => deleteItem("transactions", el.dataset.id), "delete-account": () => deleteItem("accounts", el.dataset.id), "delete-category": () => deleteItem("categories", el.dataset.id), "delete-plan": () => deleteItem("plans", el.dataset.id), "delete-quick": () => deleteItem("quickActions", el.dataset.id), "pay-plan": () => payPlan(el.dataset.id), "add-account": addAccount, "add-category": addCategory, "add-plan": addPlan, "add-quick": addQuick, "export-json": exportJson, "export-csv": exportCsv, "reset-all": resetAll };
+    (actions[action] || noop)();
   });
 
-  document.addEventListener("change", (event) => {
-    const select = event.target.closest("[data-plan-status]");
-    if (!select) return;
-    const plan = state.plans.find((item) => item.id === select.dataset.planStatus);
-    if (!plan) return;
-    plan.status = select.value;
-    saveState();
-    refreshAll();
-    notify("计划状态已更新。");
-  });
-
-  function saveTransaction(event) {
-    event.preventDefault();
-    const account = getAccount(els.transactionAccount.value);
-    if (!account) return notify("请先创建账户。");
-    const amount = Number(els.transactionAmount.value);
-    if (!Number.isFinite(amount) || amount <= 0) return notify("金额必须大于 0。");
-    const category = getCategory(els.transactionCategory.value);
-    const note = els.transactionNote.value.trim();
-    if (isOtherCategory(category) && !note) {
-      els.transactionNote.focus();
-      return notify("选择“其他”分类时必须填写备注。");
-    }
-    const item = {
-      id: els.transactionId.value || uid(),
-      type: els.transactionType.value,
-      date: els.transactionDate.value,
-      amount: roundMoney(amount),
-      accountId: els.transactionAccount.value,
-      categoryId: els.transactionCategory.value,
-      note
-    };
-    upsert("transactions", item);
-    localStorage.setItem(`${STORAGE_KEY}:last-account`, item.accountId);
-    localStorage.setItem(`${STORAGE_KEY}:last-category:${item.type}`, item.categoryId);
-    if (item.note) localStorage.setItem(`${STORAGE_KEY}:last-note`, item.note);
-    saveState();
-    resetTransactionForm();
-    refreshAll();
-    notify("流水已保存。");
-  }
-
-  function saveAccount(event) {
-    event.preventDefault();
-    const item = {
-      id: els.accountId.value || uid(),
-      name: els.accountName.value.trim(),
-      type: els.accountType.value,
-      currency: els.accountCurrency.value,
-      initialBalance: roundMoney(Number(els.accountInitial.value))
-    };
-    if (!item.name) return notify("账户名称不能为空。");
-    upsert("accounts", item);
-    saveState();
-    resetAccountForm();
-    refreshAll();
-    notify("账户已保存。");
-  }
-
-  function saveCategory(event) {
-    event.preventDefault();
-    const item = {
-      id: els.categoryId.value || uid(),
-      name: els.categoryName.value.trim(),
-      type: els.categoryType.value,
-      color: els.categoryColor.value
-    };
-    if (!item.name) return notify("分类名称不能为空。");
-    upsert("categories", item);
-    saveState();
-    resetCategoryForm();
-    refreshAll();
-    notify("分类已保存。");
-  }
-
-  function savePlan(event) {
-    event.preventDefault();
-    const amount = Number(els.planAmount.value);
-    if (!Number.isFinite(amount) || amount <= 0) return notify("计划金额必须大于 0。");
-    const item = {
-      id: els.planId.value || uid(),
-      name: els.planName.value.trim(),
-      amount: roundMoney(amount),
-      currency: els.planCurrency.value,
-      accountId: els.planAccount.value,
-      categoryId: els.planCategory.value,
-      date: els.planDate.value,
-      repeat: els.planRepeat.value,
-      status: els.planStatus.value,
-      note: els.planNote.value.trim()
-    };
-    if (!item.name) return notify("计划名称不能为空。");
-    upsert("plans", item);
-    saveState();
-    resetPlanForm();
-    refreshAll();
-    notify("计划已保存。");
-  }
-
-  function payPlan(id) {
-    const plan = state.plans.find((entry) => entry.id === id);
-    if (!plan) return;
-    const transaction = {
-      id: uid(),
-      type: "expense",
-      date: toDate(new Date()),
-      amount: plan.amount,
-      accountId: plan.accountId,
-      categoryId: plan.categoryId,
-      note: plan.note || plan.name
-    };
-    state.transactions.push(transaction);
-    plan.status = "paid";
-    localStorage.setItem(`${STORAGE_KEY}:last-account`, transaction.accountId);
-    localStorage.setItem(`${STORAGE_KEY}:last-category:expense`, transaction.categoryId);
-    saveState();
-    refreshAll();
-    notify("计划已记为流水。");
-  }
-
-  function applyTemplate(id) {
-    const template = state.templates.find((item) => item.id === id);
-    if (!template) return;
-    setView("transactions");
-    syncTypeChoice(template.type);
-    populateDynamicSelects();
-    els.transactionAmount.value = template.amount;
-    els.transactionAccount.value = getPreferredAccountId();
-    const category = state.categories.find((item) => item.type === template.type && item.name === template.categoryName);
-    if (category) els.transactionCategory.value = category.id;
-    els.transactionNote.value = template.note || "";
-    els.transactionAmount.focus();
-  }
-
-  function renderTemplates() {
-    els.templateChips.innerHTML = state.templates.map((template) => {
-      return `<button class="template-chip" type="button" data-template-id="${escapeHtml(template.id)}"><strong>${escapeHtml(template.name)}</strong><span>${formatMoney(template.amount, BASE_CURRENCY)}</span></button>`;
-    }).join("");
-  }
-
-  function renderNoteSuggestions() {
-    const notes = Array.from(new Set(state.transactions.map((item) => item.note).filter(Boolean))).slice(-12).reverse();
-    els.noteSuggestions.innerHTML = notes.map((note) => `<option value="${escapeHtml(note)}"></option>`).join("");
-  }
-
-  function editItem(type, id) {
-    if (type === "transaction") {
-      const item = state.transactions.find((entry) => entry.id === id);
-      if (!item) return;
-      setView("transactions");
-      els.transactionId.value = item.id;
-      els.transactionType.value = item.type;
-      syncTypeChoice(item.type);
-      populateDynamicSelects();
-      els.transactionDate.value = item.date;
-      els.transactionAmount.value = item.amount;
-      els.transactionAccount.value = item.accountId;
-      els.transactionCategory.value = item.categoryId;
-      els.transactionNote.value = item.note || "";
-      els.transactionAmount.focus();
-    }
-    if (type === "account") {
-      const item = state.accounts.find((entry) => entry.id === id);
-      if (!item) return;
-      els.accountId.value = item.id;
-      els.accountName.value = item.name;
-      els.accountType.value = item.type || "debit";
-      els.accountCurrency.value = item.currency;
-      els.accountInitial.value = item.initialBalance;
-      els.accountName.focus();
-    }
-    if (type === "category") {
-      const item = state.categories.find((entry) => entry.id === id);
-      if (!item) return;
-      els.categoryId.value = item.id;
-      els.categoryName.value = item.name;
-      els.categoryType.value = item.type;
-      els.categoryColor.value = item.color;
-      els.categoryName.focus();
-    }
-    if (type === "plan") {
-      const item = state.plans.find((entry) => entry.id === id);
-      if (!item) return;
-      setView("plans");
-      els.planId.value = item.id;
-      els.planName.value = item.name;
-      els.planAmount.value = item.amount;
-      els.planCurrency.value = item.currency || BASE_CURRENCY;
-      els.planAccount.value = item.accountId;
-      els.planCategory.value = item.categoryId;
-      els.planDate.value = item.date;
-      els.planRepeat.value = item.repeat;
-      els.planStatus.value = item.status;
-      els.planNote.value = item.note || "";
-      els.planName.focus();
-    }
-  }
-
-  function deleteItem(type, id) {
-    const collection = {
-      transaction: "transactions",
-      account: "accounts",
-      category: "categories",
-      plan: "plans"
-    }[type];
-    if (!collection) return;
-    if (type === "category" && state.transactions.some((item) => item.categoryId === id)) {
-      return notify("该分类已有流水，不能删除。");
-    }
-    if (type === "category" && state.plans.some((item) => item.categoryId === id)) {
-      return notify("该分类已有计划，不能删除。");
-    }
-    if (type === "account" && state.transactions.some((item) => item.accountId === id)) {
-      return notify("该账户已有流水，不能删除。");
-    }
-    if (type === "account" && state.plans.some((item) => item.accountId === id)) {
-      return notify("该账户已有计划，不能删除。");
-    }
-    if (!window.confirm("确认删除这条记录？")) return;
-    state[collection] = state[collection].filter((item) => item.id !== id);
-    saveState();
-    refreshAll();
-    notify("已删除。");
-  }
-
-  function resetTransactionForm() {
-    els.transactionForm.reset();
-    els.transactionId.value = "";
-    els.transactionType.value = "expense";
-    syncTypeChoice("expense");
-    els.transactionDate.value = toDate(new Date());
-    populateDynamicSelects();
-    els.transactionAccount.value = getPreferredAccountId();
-    const recentCategory = localStorage.getItem(`${STORAGE_KEY}:last-category:expense`);
-    if (state.categories.some((category) => category.id === recentCategory && category.type === "expense")) {
-      els.transactionCategory.value = recentCategory;
-    }
-    els.transactionNote.value = localStorage.getItem(`${STORAGE_KEY}:last-note`) || "";
-  }
-
-  function resetAccountForm() {
-    els.accountForm.reset();
-    els.accountId.value = "";
-    els.accountType.value = "debit";
-    els.accountCurrency.value = BASE_CURRENCY;
-    els.accountInitial.value = "0";
-  }
-
-  function resetCategoryForm() {
-    els.categoryForm.reset();
-    els.categoryId.value = "";
-    els.categoryColor.value = "#2563eb";
-  }
-
-  function resetPlanForm() {
-    els.planForm.reset();
-    els.planId.value = "";
-    els.planDate.value = toDate(new Date());
-    els.planCurrency.value = BASE_CURRENCY;
-    els.planRepeat.value = "none";
-    els.planStatus.value = "pending";
-    populateDynamicSelects();
-  }
-
-  function clearFilters() {
-    els.filterStart.value = "";
-    els.filterEnd.value = "";
-    els.filterType.value = "all";
-    els.filterCategory.value = "all";
-    els.filterAccount.value = "all";
-    els.globalSearch.value = "";
-    refreshAll();
-  }
-
-  function exportJson() {
-    downloadFile(`e-account-backup-${todayStamp()}.json`, JSON.stringify(state, null, 2), "application/json;charset=utf-8");
-  }
-
-  function exportCsv() {
-    const header = ["日期", "类型", "分类", "账户", "账户类型", "币种", "金额", "备注"];
-    const lines = getFilteredTransactions().map((transaction) => {
-      const account = getAccount(transaction.accountId);
-      const category = getCategory(transaction.categoryId);
-      return [
-        transaction.date,
-        transaction.type === "income" ? "收入" : "支出",
-        category?.name || "",
-        account?.name || "",
-        accountTypeLabel(account?.type),
-        account?.currency || "",
-        transaction.amount,
-        transaction.note || ""
-      ].map(csvCell).join(",");
-    });
-    const csv = `\ufeff${header.join(",")}\n${lines.join("\n")}`;
-    downloadFile(`e-account-transactions-${todayStamp()}.csv`, csv, "text/csv;charset=utf-8");
-  }
-
-  function importJson(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const nextState = JSON.parse(String(reader.result));
-        validateState(nextState);
-        state = normalizeState(nextState);
-        saveState();
-        refreshAll();
-        notify("JSON 备份已导入。");
-      } catch (error) {
-        notify(`导入失败：${error.message}`);
-      } finally {
-        els.importJsonInput.value = "";
-      }
-    };
-    reader.readAsText(file);
-  }
-
-  function resetAllData() {
-    if (!window.confirm("确认恢复默认数据？当前本地数据会被清空。")) return;
-    state = cloneDefaultData();
-    saveState();
-    resetTransactionForm();
-    resetAccountForm();
-    resetCategoryForm();
-    resetPlanForm();
-    refreshAll();
-    notify("已恢复默认数据。");
-  }
-
-  function getFilteredTransactions() {
-    const keyword = els.globalSearch.value.trim().toLowerCase();
-    return state.transactions
-      .filter((transaction) => {
-        if (els.filterStart.value && transaction.date < els.filterStart.value) return false;
-        if (els.filterEnd.value && transaction.date > els.filterEnd.value) return false;
-        if (els.filterType.value !== "all" && transaction.type !== els.filterType.value) return false;
-        if (els.filterCategory.value !== "all" && transaction.categoryId !== els.filterCategory.value) return false;
-        if (els.filterAccount.value !== "all" && transaction.accountId !== els.filterAccount.value) return false;
-        if (!keyword) return true;
-        const account = getAccount(transaction.accountId);
-        const category = getCategory(transaction.categoryId);
-        return [transaction.note, account?.name, category?.name].some((text) => String(text || "").toLowerCase().includes(keyword));
-      })
-      .sort((a, b) => b.date.localeCompare(a.date));
-  }
-
-  function getTransactionsForMonth(month) {
-    return state.transactions.filter((transaction) => transaction.date.startsWith(month));
-  }
-
-  function summarizeByCurrency(transactions) {
-    return transactions.reduce((acc, transaction) => {
-      const account = getAccount(transaction.accountId);
-      const currency = account?.currency || BASE_CURRENCY;
-      if (!acc[currency]) acc[currency] = { income: 0, expense: 0 };
-      acc[currency][transaction.type] += transaction.amount;
-      return acc;
-    }, {});
-  }
-
-  function calculateAccountBalances() {
-    const balances = {};
-    state.accounts.forEach((account) => {
-      balances[account.id] = Number(account.initialBalance) || 0;
-    });
-    state.transactions.forEach((transaction) => {
-      if (!(transaction.accountId in balances)) return;
-      balances[transaction.accountId] += transaction.type === "income" ? transaction.amount : -transaction.amount;
-    });
-    Object.keys(balances).forEach((id) => {
-      balances[id] = roundMoney(balances[id]);
-    });
-    return balances;
-  }
-
-  function planStatusSelect(plan) {
-    return `
-      <select class="status-select ${plan.status}" data-plan-status="${escapeHtml(plan.id)}">
-        ${Object.entries(PLAN_STATUSES).map(([value, label]) => {
-          return `<option value="${value}" ${plan.status === value ? "selected" : ""}>${label}</option>`;
-        }).join("")}
-      </select>
-    `;
-  }
-
-  function repeatLabel(repeat) {
-    return PLAN_REPEATS[repeat] || PLAN_REPEATS.none;
-  }
-
-  function statusLabel(status) {
-    return PLAN_STATUSES[status] || PLAN_STATUSES.pending;
-  }
-
-  function syncTypeChoice(type) {
-    els.transactionType.value = type;
-    els.typeExpense.checked = type === "expense";
-    els.typeIncome.checked = type === "income";
-  }
-
-  function getPreferredAccountId() {
-    const stored = localStorage.getItem(`${STORAGE_KEY}:last-account`);
-    if (state.accounts.some((account) => account.id === stored)) return stored;
-    return state.accounts[0]?.id || "";
-  }
-
-  function drawCategoryShareChart(transactions) {
-    const canvas = els.categoryShareChart;
-    if (!canvas || currentView !== "dashboard") return;
-    const ratio = window.devicePixelRatio || 1;
-    const width = canvas.clientWidth || 420;
-    const height = 220;
-    canvas.width = Math.floor(width * ratio);
-    canvas.height = Math.floor(height * ratio);
-    const ctx = canvas.getContext("2d");
-    ctx.scale(ratio, ratio);
-    ctx.clearRect(0, 0, width, height);
-    const totals = {};
-    transactions.forEach((transaction) => {
-      const account = getAccount(transaction.accountId);
-      if (transaction.type !== "expense" || account?.currency !== BASE_CURRENCY) return;
-      const category = getCategory(transaction.categoryId);
-      const name = category?.name || "未分类";
-      totals[name] = (totals[name] || 0) + transaction.amount;
-    });
-    const items = Object.entries(totals).sort((a, b) => b[1] - a[1]).slice(0, 5);
-    const total = items.reduce((sum, item) => sum + item[1], 0);
-    if (!items.length) {
-      ctx.fillStyle = "#7a8ba0";
-      ctx.font = "14px -apple-system, BlinkMacSystemFont, sans-serif";
-      ctx.fillText("本月暂无人民币支出", 18, 36);
-      return;
-    }
-    const colors = ["#4aa3ff", "#8dcfff", "#7dd3fc", "#a78bfa", "#f9a8b8"];
-    let start = -Math.PI / 2;
-    items.forEach((item, index) => {
-      const angle = (item[1] / total) * Math.PI * 2;
-      ctx.beginPath();
-      ctx.moveTo(92, 108);
-      ctx.arc(92, 108, 72, start, start + angle);
-      ctx.closePath();
-      ctx.fillStyle = colors[index % colors.length];
-      ctx.fill();
-      start += angle;
-    });
-    ctx.fillStyle = "#ffffff";
-    ctx.beginPath();
-    ctx.arc(92, 108, 38, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.font = "12px -apple-system, BlinkMacSystemFont, sans-serif";
-    items.forEach((item, index) => {
-      const y = 46 + index * 28;
-      ctx.fillStyle = colors[index % colors.length];
-      ctx.fillRect(200, y - 10, 12, 12);
-      ctx.fillStyle = "#1d2939";
-      ctx.fillText(`${item[0]} ${Math.round(item[1] / total * 100)}%`, 220, y);
-    });
-  }
-
-  function drawWeekChart() {
-    const canvas = els.weekChart;
-    if (!canvas || currentView !== "dashboard") return;
-    const ratio = window.devicePixelRatio || 1;
-    const width = canvas.clientWidth || 420;
-    const height = 220;
-    canvas.width = Math.floor(width * ratio);
-    canvas.height = Math.floor(height * ratio);
-    const ctx = canvas.getContext("2d");
-    ctx.scale(ratio, ratio);
-    ctx.clearRect(0, 0, width, height);
-    const days = Array.from({ length: 7 }, (_, index) => {
-      const date = addDays(startOfDay(new Date()), index - 6);
-      return { date: toDate(date), amount: 0 };
-    });
-    state.transactions.forEach((transaction) => {
-      const account = getAccount(transaction.accountId);
-      const item = days.find((day) => day.date === transaction.date);
-      if (item && transaction.type === "expense" && account?.currency === BASE_CURRENCY) item.amount += transaction.amount;
-    });
-    const max = Math.max(...days.map((day) => day.amount), 100);
-    const left = 28;
-    const bottom = 180;
-    const barW = Math.max(18, (width - 72) / 7 - 10);
-    ctx.font = "12px -apple-system, BlinkMacSystemFont, sans-serif";
-    days.forEach((day, index) => {
-      const x = left + index * ((width - 72) / 7);
-      const h = Math.max(2, day.amount / max * 130);
-      const grad = ctx.createLinearGradient(0, bottom - h, 0, bottom);
-      grad.addColorStop(0, "#4aa3ff");
-      grad.addColorStop(1, "#b9e3ff");
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.roundRect(x, bottom - h, barW, h, 8);
-      ctx.fill();
-      ctx.fillStyle = "#637083";
-      ctx.fillText(day.date.slice(5).replace("-", "/"), x - 2, 204);
-    });
-  }
-
-  function drawTrendChart() {
-    const canvas = els.trendChart;
-    if (!canvas || currentView !== "dashboard") return;
-    const containerWidth = canvas.clientWidth || 900;
-    const ratio = window.devicePixelRatio || 1;
-    canvas.width = Math.floor(containerWidth * ratio);
-    canvas.height = Math.floor(320 * ratio);
-    const ctx = canvas.getContext("2d");
-    ctx.scale(ratio, ratio);
-    ctx.clearRect(0, 0, containerWidth, 320);
-
-    const month = els.monthPicker.value;
-    const days = daysInMonth(month);
-    const daily = Array.from({ length: days }, (_, index) => ({ day: index + 1, income: 0, expense: 0 }));
-    getTransactionsForMonth(month).forEach((transaction) => {
-      const account = getAccount(transaction.accountId);
-      if (account?.currency !== BASE_CURRENCY) return;
-      const day = Number(transaction.date.slice(-2));
-      daily[day - 1][transaction.type] += transaction.amount;
-    });
-
-    const width = containerWidth;
-    const height = 320;
-    const pad = { top: 24, right: 18, bottom: 34, left: 56 };
-    const chartW = width - pad.left - pad.right;
-    const chartH = height - pad.top - pad.bottom;
-    const maxValue = Math.max(...daily.flatMap((item) => [item.income, item.expense]), 100);
-
-    ctx.strokeStyle = "#d8e8f4";
-    ctx.lineWidth = 1;
-    ctx.font = "12px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillStyle = "#637083";
-    for (let i = 0; i <= 4; i += 1) {
-      const y = pad.top + chartH * (i / 4);
-      ctx.beginPath();
-      ctx.moveTo(pad.left, y);
-      ctx.lineTo(width - pad.right, y);
-      ctx.stroke();
-      const label = Math.round(maxValue * (1 - i / 4));
-      ctx.fillText(String(label), 8, y + 4);
-    }
-
-    drawLine(ctx, daily, "income", "#24a06a", pad, chartW, chartH, maxValue);
-    drawLine(ctx, daily, "expense", "#e55d73", pad, chartW, chartH, maxValue);
-
-    ctx.fillStyle = "#637083";
-    [1, Math.ceil(days / 2), days].forEach((day) => {
-      const x = pad.left + ((day - 1) / Math.max(1, days - 1)) * chartW;
-      ctx.fillText(`${day}日`, x - 10, height - 10);
-    });
-    ctx.fillStyle = "#24a06a";
-    ctx.fillText("收入 CNY", pad.left, 18);
-    ctx.fillStyle = "#e55d73";
-    ctx.fillText("支出 CNY", pad.left + 78, 18);
-  }
-
-  function drawLine(ctx, daily, key, color, pad, chartW, chartH, maxValue) {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    daily.forEach((item, index) => {
-      const x = pad.left + (index / Math.max(1, daily.length - 1)) * chartW;
-      const y = pad.top + chartH - (item[key] / maxValue) * chartH;
-      if (index === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-  }
-
-  function upsert(collection, item) {
-    const index = state[collection].findIndex((entry) => entry.id === item.id);
-    if (index >= 0) state[collection][index] = item;
-    else state[collection].push(item);
-  }
-
-  function loadState() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return cloneDefaultData();
-      const parsed = JSON.parse(raw);
-      validateState(parsed);
-      return normalizeState(parsed);
-    } catch (_error) {
-      return cloneDefaultData();
-    }
-  }
-
-  function saveState() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }
-
-  function validateState(data) {
-    if (!data || typeof data !== "object") throw new Error("文件不是有效的记账数据。");
-    ["accounts", "categories", "transactions"].forEach((key) => {
-      if (!Array.isArray(data[key])) throw new Error(`缺少 ${key} 数据。`);
-    });
-    if (data.budgets && !Array.isArray(data.budgets)) throw new Error("budgets 数据格式错误。");
-    if (data.plans && !Array.isArray(data.plans)) throw new Error("plans 数据格式错误。");
-    if (data.templates && !Array.isArray(data.templates)) throw new Error("templates 数据格式错误。");
-  }
-
-  function normalizeState(data) {
-    const normalized = {
-      version: 1,
-      accounts: data.accounts.map((item) => ({
-        id: String(item.id || uid()),
-        name: String(item.name || "未命名账户"),
-        type: ACCOUNT_TYPES[item.type] ? item.type : inferAccountType(item.name),
-        currency: CURRENCIES.includes(item.currency) ? item.currency : BASE_CURRENCY,
-        initialBalance: roundMoney(Number(item.initialBalance) || 0)
-      })),
-      categories: data.categories.map((item) => ({
-        id: String(item.id || uid()),
-        name: String(item.name || "未命名分类"),
-        type: item.type === "income" ? "income" : "expense",
-        color: /^#[0-9a-fA-F]{6}$/.test(item.color) ? item.color : "#2563eb"
-      })),
-      budgets: (data.budgets || []).map((item) => ({
-        id: String(item.id || uid()),
-        month: /^\d{4}-\d{2}$/.test(item.month) ? item.month : toMonth(new Date()),
-        categoryId: String(item.categoryId || ""),
-        amount: Math.max(0, roundMoney(Number(item.amount) || 0))
-      })),
-      templates: normalizeTemplates(data.templates),
-      plans: (data.plans || []).map((item) => ({
-        id: String(item.id || uid()),
-        name: String(item.name || "计划支出").slice(0, 40),
-        amount: Math.max(0, roundMoney(Number(item.amount) || 0)),
-        currency: CURRENCIES.includes(item.currency) ? item.currency : BASE_CURRENCY,
-        accountId: String(item.accountId || ""),
-        categoryId: String(item.categoryId || ""),
-        date: /^\d{4}-\d{2}-\d{2}$/.test(item.date) ? item.date : toDate(new Date()),
-        repeat: PLAN_REPEATS[item.repeat] ? item.repeat : "none",
-        status: PLAN_STATUSES[item.status] ? item.status : "pending",
-        note: String(item.note || "").slice(0, 80)
-      })),
-      transactions: data.transactions.map((item) => ({
-        id: String(item.id || uid()),
-        type: item.type === "income" ? "income" : "expense",
-        date: /^\d{4}-\d{2}-\d{2}$/.test(item.date) ? item.date : toDate(new Date()),
-        amount: Math.max(0, roundMoney(Number(item.amount) || 0)),
-        accountId: String(item.accountId || ""),
-        categoryId: String(item.categoryId || ""),
-        note: String(item.note || "").slice(0, 80)
-      }))
-    };
-    ensureDefaultCategories(normalized);
-    ensureDefaultTemplates(normalized);
-    migrateBudgetsToPlans(normalized, data);
-    return normalized;
-  }
-
-  function migrateBudgetsToPlans(data, originalData) {
-    if (originalData.plans && originalData.plans.length) return;
-    data.budgets.forEach((budget) => {
-      const category = data.categories.find((item) => item.id === budget.categoryId);
-      data.plans.push({
-        id: `plan-${budget.id}`,
-        name: category?.name ? `${category.name}计划` : "计划支出",
-        amount: budget.amount,
-        currency: BASE_CURRENCY,
-        accountId: data.accounts[0]?.id || "",
-        categoryId: budget.categoryId,
-        date: `${budget.month}-01`,
-        repeat: "none",
-        status: "pending",
-        note: "由旧预算数据迁移"
-      });
-    });
-  }
-
-  function normalizeTemplates(templates) {
-    return (templates || []).map((item) => ({
-      id: String(item.id || uid()),
-      name: String(item.name || "模板").slice(0, 16),
-      type: item.type === "income" ? "income" : "expense",
-      amount: Math.max(0, roundMoney(Number(item.amount) || 0)),
-      categoryName: String(item.categoryName || "其他").slice(0, 20),
-      note: String(item.note || "").slice(0, 80)
-    }));
-  }
-
-  function ensureDefaultTemplates(data) {
-    DEFAULT_TEMPLATES.forEach((template) => {
-      const exists = data.templates.some((item) => item.id === template.id || item.name === template.name);
-      if (!exists) data.templates.push({ ...template });
-    });
-  }
-
-  function ensureDefaultCategories(data) {
-    defaultData.categories.forEach((defaultCategory) => {
-      const exists = data.categories.some((category) => {
-        return category.name === defaultCategory.name && category.type === defaultCategory.type;
-      });
-      if (!exists) {
-        data.categories.push({ ...defaultCategory, id: uid() });
-      }
-    });
-  }
-
-  function inferAccountType(name) {
-    const text = String(name || "");
-    if (text.includes("信用")) return "credit";
-    if (text.includes("现金")) return "cash";
-    if (text.includes("微信") || text.includes("支付宝") || text.includes("钱包")) return "wallet";
-    if (text.includes("储蓄") || text.includes("银行卡") || text.includes("银行")) return "debit";
-    return "debit";
-  }
-
-  function cloneDefaultData() {
-    return JSON.parse(JSON.stringify(defaultData));
-  }
-
-  function getAccount(id) {
-    return state.accounts.find((account) => account.id === id);
-  }
-
-  function getCategory(id) {
-    return state.categories.find((category) => category.id === id);
-  }
-
-  function typePill(type) {
-    const label = type === "income" ? "收入" : "支出";
-    return `<span class="type-pill ${type}">${label}</span>`;
-  }
-
-  function accountTypeLabel(type) {
-    return ACCOUNT_TYPES[type] || ACCOUNT_TYPES.other;
-  }
-
-  function accountTypePill(type) {
-    const safeType = ACCOUNT_TYPES[type] ? type : "other";
-    return `<span class="account-type-pill ${safeType}">${accountTypeLabel(safeType)}</span>`;
-  }
-
-  function isOtherCategory(category) {
-    return category?.name === "其他";
-  }
-
-  function emptyRow(colspan, text) {
-    return `<tr><td colspan="${colspan}" class="empty-state">${text}</td></tr>`;
-  }
-
-  function formatMoney(value, currency) {
-    return `${currency} ${formatAmount(value)}`;
-  }
-
-  function formatAmount(value) {
-    return Number(value || 0).toLocaleString("zh-CN", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    });
-  }
-
-  function roundMoney(value) {
-    return Math.round((Number(value) || 0) * 100) / 100;
-  }
-
-  function toDate(date) {
-    return date.toISOString().slice(0, 10);
-  }
-
-  function parseLocalDate(value) {
-    const [year, month, day] = String(value).split("-").map(Number);
-    return startOfDay(new Date(year, month - 1, day));
-  }
-
-  function startOfDay(date) {
-    const next = new Date(date);
-    next.setHours(0, 0, 0, 0);
-    return next;
-  }
-
-  function addDays(date, days) {
-    const next = new Date(date);
-    next.setDate(next.getDate() + days);
-    return next;
-  }
-
-  function previousMonth(month) {
-    const [year, monthNumber] = month.split("-").map(Number);
-    return toMonth(new Date(year, monthNumber - 2, 1));
-  }
-
-  function toMonth(date) {
-    return date.toISOString().slice(0, 7);
-  }
-
-  function daysInMonth(month) {
-    const [year, monthNumber] = month.split("-").map(Number);
-    return new Date(year, monthNumber, 0).getDate();
-  }
-
-  function uid() {
-    if (crypto && crypto.randomUUID) return crypto.randomUUID();
-    return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  }
-
-  function todayStamp() {
-    return toDate(new Date()).replaceAll("-", "");
-  }
-
-  function downloadFile(filename, content, type) {
-    const blob = new Blob([content], { type });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(link.href);
-  }
-
-  function csvCell(value) {
-    const text = String(value ?? "");
-    return `"${text.replaceAll("\"", "\"\"")}"`;
-  }
-
-  function escapeHtml(value) {
-    return String(value ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll("\"", "&quot;")
-      .replaceAll("'", "&#039;");
-  }
-
-  function notify(message) {
-    els.notice.textContent = message;
-    els.notice.classList.add("show");
-    window.clearTimeout(notify.timer);
-    notify.timer = window.setTimeout(() => {
-      els.notice.classList.remove("show");
-    }, 3200);
-  }
+  function syncDraftFromInputs() { const amount = document.getElementById("draft-amount"); const date = document.getElementById("draft-date"); const note = document.getElementById("draft-note"); if (amount) draft.amount = amount.value; if (date) draft.date = date.value; if (note) draft.note = note.value.trim(); }
+  function setDraftType(type) { draft.type = type; if (type === "transfer") { draft.accountId = state.accounts.find((a) => a.type !== "credit")?.id || ""; draft.targetAccountId = state.accounts.find((a) => a.type === "credit")?.id || ""; draft.categoryId = ""; } else { draft.accountId = preferredAccount(type); draft.categoryId = state.categories.find((c) => c.type === type)?.id || ""; draft.targetAccountId = ""; } render(); }
+  function saveTransaction() { syncDraftFromInputs(); const amount = round(Number(draft.amount)); if (!amount || amount <= 0) return notify("金额必须大于 0。"); if (!draft.accountId) return notify("请选择账户。"); if (draft.type === "transfer" && !draft.targetAccountId) return notify("请选择要还款的信用卡。"); const category = categoryById(draft.categoryId); if (draft.type !== "transfer" && isOther(category) && !draft.note) return notify("选择“其他”分类时必须填写备注。"); const item = { id: editing || uid(), type: draft.type, date: draft.date || toDate(new Date()), amount, accountId: draft.accountId, targetAccountId: draft.type === "transfer" ? draft.targetAccountId : "", categoryId: draft.type === "transfer" ? "" : draft.categoryId, note: draft.note }; upsert("transactions", item); localStorage.setItem(`${STORAGE_KEY}:last-account`, item.accountId); if (item.categoryId) localStorage.setItem(`${STORAGE_KEY}:last-category:${item.type}`, item.categoryId); if (item.note) localStorage.setItem(`${STORAGE_KEY}:last-note`, item.note); saveState(); editing = null; draft = newDraft("expense"); view = "ledger"; render(); notify("流水已保存。"); }
+  function editTransaction(id) { const item = state.transactions.find((t) => t.id === id); if (!item) return; editing = id; draft = { type: item.type, amount: item.amount, date: item.date, accountId: item.accountId, targetAccountId: item.targetAccountId || "", categoryId: item.categoryId || "", note: item.note || "" }; view = "record"; render(); }
+  function addAccount() { const name = value("account-name").trim(); if (!name) return notify("账户名称不能为空。"); state.accounts.push({ id: uid(), name, type: value("account-type") || "debit", currency: value("account-currency") || BASE_CURRENCY, initialBalance: round(Number(value("account-initial")) || 0), billDay: clampDay(value("account-bill-day")), dueDay: clampDay(value("account-due-day")), creditLimit: 0 }); saveState(); render(); notify("账户已新增。"); }
+  function addCategory() { const name = value("category-name").trim(); if (!name) return notify("分类名称不能为空。"); state.categories.push({ id: uid(), name, type: value("category-type") === "income" ? "income" : "expense", color: value("category-color") || "#308df5", icon: value("category-icon").trim().slice(0, 2) || name.slice(0, 1) }); saveState(); render(); notify("分类已新增。"); }
+  function addPlan() { const name = value("plan-name").trim(); const amount = round(Number(value("plan-amount")) || 0); if (!name || amount <= 0) return notify("请填写提醒名称和金额。"); state.plans.push({ id: uid(), name, amount, currency: accountById(value("plan-account"))?.currency || BASE_CURRENCY, accountId: value("plan-account"), categoryId: value("plan-category"), date: value("plan-date") || toDate(new Date()), repeat: value("plan-repeat") || "none", status: "pending", note: value("plan-note").trim() }); saveState(); render(); notify("提醒已新增。"); }
+  function addQuick() { const name = value("quick-name").trim(); if (!name) return notify("快捷入口名称不能为空。"); const type = value("quick-type") || "expense"; state.quickActions.push({ id: uid(), name, type, amount: value("quick-amount"), categoryName: type === "income" ? "其他" : "其他", note: value("quick-note").trim() }); saveState(); render(); notify("快捷入口已新增。"); }
+  function payPlan(id) { const plan = state.plans.find((p) => p.id === id); if (!plan) return; state.transactions.push({ id: uid(), type: "expense", date: toDate(new Date()), amount: plan.amount, accountId: plan.accountId, categoryId: plan.categoryId, targetAccountId: "", note: plan.note || plan.name }); plan.status = "paid"; saveState(); render(); notify("提醒已记为流水。"); }
+  function applyQuick(id) { const quick = state.quickActions.find((q) => q.id === id); if (!quick) return; draft = newDraft(quick.type); draft.amount = quick.amount || ""; draft.note = quick.note || ""; const cat = state.categories.find((c) => c.type === quick.type && c.name === quick.categoryName); if (cat) draft.categoryId = cat.id; view = "record"; render(); }
+  function parseDraftNote() { syncDraftFromInputs(); const text = draft.note; if (!text) return notify("先输入一句话，例如“今天午饭 28 支付宝”。"); const amount = text.match(/(\d+(?:\.\d{1,2})?)/); if (amount) draft.amount = amount[1]; const isIncome = /工资|收入|奖金|奖学金|兼职/.test(text); const isPay = /还.*信用卡|信用卡.*还款|还款/.test(text); if (isPay) draft.type = "transfer"; else if (isIncome) draft.type = "income"; state.accounts.forEach((account) => { if (text.includes(account.name)) draft.accountId = account.id; }); state.categories.forEach((category) => { if (text.includes(category.name)) { draft.type = category.type; draft.categoryId = category.id; } }); if (draft.type === "transfer" && !draft.targetAccountId) draft.targetAccountId = state.accounts.find((a) => a.type === "credit")?.id || ""; render(); notify("已按文本生成草稿，请确认后保存。"); }
+  function startVoice() { const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SpeechRecognition) return notify("当前浏览器不支持本地语音识别。"); const recognition = new SpeechRecognition(); recognition.lang = "zh-CN"; recognition.interimResults = false; recognition.onresult = (event) => { draft.note = event.results[0][0].transcript; parseDraftNote(); }; recognition.onerror = () => notify("语音识别失败，可以手动输入。"); recognition.start(); notify("正在听，请说一笔账。"); }
+  function clearFilters() { filters = { type: "all", category: "all", account: "all" }; search = ""; render(); }
+  function resetDraft() { editing = null; draft = newDraft("expense"); render(); }
+  function deleteItem(collection, id) { if (collection === "accounts" && state.transactions.some((t) => t.accountId === id || t.targetAccountId === id)) return notify("该账户已有流水，不能删除。"); if (collection === "categories" && state.transactions.some((t) => t.categoryId === id)) return notify("该分类已有流水，不能删除。"); if (!window.confirm("确认删除？")) return; state[collection] = state[collection].filter((item) => item.id !== id); saveState(); render(); notify("已删除。"); }
+
+  function filteredTransactions() { const keyword = search.trim().toLowerCase(); return state.transactions.filter((t) => { if (!t.date.startsWith(selectedMonth)) return false; if (filters.type !== "all" && t.type !== filters.type) return false; if (filters.category !== "all" && t.categoryId !== filters.category) return false; if (filters.account !== "all" && t.accountId !== filters.account && t.targetAccountId !== filters.account) return false; if (!keyword) return true; const a = accountById(t.accountId); const target = accountById(t.targetAccountId); const c = categoryById(t.categoryId); return [t.note, a?.name, target?.name, c?.name].some((x) => String(x || "").toLowerCase().includes(keyword)); }).sort(byDateDesc); }
+  function monthTransactions(month) { return state.transactions.filter((t) => t.date.startsWith(month)); }
+  function summarize(transactions) { return transactions.reduce((acc, t) => { if (t.type === "transfer") return acc; const currency = accountById(t.accountId)?.currency || BASE_CURRENCY; acc[currency] ||= { income: 0, expense: 0 }; acc[currency][t.type] += t.amount; return acc; }, {}); }
+  function balances() { const result = {}; state.accounts.forEach((a) => result[a.id] = round(Number(a.initialBalance) || 0)); state.transactions.forEach((t) => { const account = accountById(t.accountId); if (!account) return; if (t.type === "transfer") { result[t.accountId] = round((result[t.accountId] || 0) - t.amount); if (t.targetAccountId) result[t.targetAccountId] = round((result[t.targetAccountId] || 0) - t.amount); return; } const delta = t.type === "income" ? t.amount : -t.amount; if (account.type === "credit") result[t.accountId] = round((result[t.accountId] || 0) - delta); else result[t.accountId] = round((result[t.accountId] || 0) + delta); }); return result; }
+  function assetSnapshot() { const b = balances(); const assets = {}, debts = {}, net = {}; state.accounts.forEach((a) => { const cur = a.currency || BASE_CURRENCY; assets[cur] ||= 0; debts[cur] ||= 0; net[cur] ||= 0; const value = b[a.id] || 0; if (a.type === "credit") debts[cur] += Math.max(0, value); else assets[cur] += value; }); Object.keys(net).forEach((cur) => net[cur] = round((assets[cur] || 0) - (debts[cur] || 0))); return { assets, debts, net, balances: b }; }
+
+  function loadState() { try { const raw = localStorage.getItem(STORAGE_KEY); return normalizeState(raw ? JSON.parse(raw) : {}); } catch (_error) { return normalizeState({}); } }
+  function normalizeState(data) { const accounts = Array.isArray(data.accounts) && data.accounts.length ? data.accounts : [{ id: uid(), name: "现金", type: "cash", currency: BASE_CURRENCY, initialBalance: 0 }, { id: uid(), name: "储蓄卡", type: "debit", currency: BASE_CURRENCY, initialBalance: 0 }, { id: uid(), name: "信用卡", type: "credit", currency: BASE_CURRENCY, initialBalance: 0, billDay: 1, dueDay: 20 }]; const categories = Array.isArray(data.categories) && data.categories.length ? data.categories : DEFAULT_CATEGORIES.map(makeCategory); const normalized = { version: 2, accounts: accounts.map((a) => ({ id: String(a.id || uid()), name: String(a.name || "未命名账户"), type: ACCOUNT_TYPES[a.type] ? a.type : inferAccountType(a.name), currency: CURRENCIES.includes(a.currency) ? a.currency : BASE_CURRENCY, initialBalance: round(Number(a.initialBalance) || 0), billDay: clampDay(a.billDay), dueDay: clampDay(a.dueDay), creditLimit: round(Number(a.creditLimit) || 0) })), categories: categories.map((c) => ({ id: String(c.id || uid()), name: String(c.name || "未命名分类"), type: c.type === "income" ? "income" : "expense", color: /^#[0-9a-fA-F]{6}$/.test(c.color) ? c.color : "#308df5", icon: String(c.icon || c.name || "账").slice(0, 2) })), budgets: Array.isArray(data.budgets) ? data.budgets : [], plans: Array.isArray(data.plans) ? data.plans.map(normalizePlan) : [], quickActions: normalizeQuickActions(data.quickActions || data.templates), transactions: Array.isArray(data.transactions) ? data.transactions.map(normalizeTransaction) : [] }; migrateBudgets(normalized, data); ensureDefaults(normalized); return normalized; }
+  function migrateBudgets(data, original) { if (Array.isArray(original.plans) && original.plans.length) return; if (!Array.isArray(original.budgets)) return; original.budgets.forEach((budget) => { const category = data.categories.find((c) => c.id === String(budget.categoryId)); data.plans.push({ id: `plan-${budget.id || uid()}`, name: category?.name ? `${category.name}计划` : "计划支出", amount: Math.max(0, round(Number(budget.amount) || 0)), currency: BASE_CURRENCY, accountId: data.accounts[0]?.id || "", categoryId: String(budget.categoryId || ""), date: /^\d{4}-\d{2}$/.test(String(budget.month)) ? `${budget.month}-01` : toDate(new Date()), repeat: "none", status: "pending", note: "由旧预算数据迁移" }); }); }
+  function normalizeTransaction(t) { return { id: String(t.id || uid()), type: t.type === "income" || t.type === "transfer" ? t.type : "expense", date: validDate(t.date) ? t.date : toDate(new Date()), amount: Math.max(0, round(Number(t.amount) || 0)), accountId: String(t.accountId || ""), targetAccountId: String(t.targetAccountId || ""), categoryId: String(t.categoryId || ""), note: String(t.note || "").slice(0, 80) }; }
+  function normalizePlan(p) { return { id: String(p.id || uid()), name: String(p.name || "提醒").slice(0, 40), amount: Math.max(0, round(Number(p.amount) || 0)), currency: CURRENCIES.includes(p.currency) ? p.currency : BASE_CURRENCY, accountId: String(p.accountId || ""), categoryId: String(p.categoryId || ""), date: validDate(p.date) ? p.date : toDate(new Date()), repeat: PLAN_REPEATS[p.repeat] ? p.repeat : "none", status: PLAN_STATUSES[p.status] ? p.status : "pending", note: String(p.note || "").slice(0, 80) }; }
+  function normalizeQuickActions(input) { const source = Array.isArray(input) && input.length ? input : DEFAULT_QUICK_ACTIONS; return source.filter((q) => !["早餐", "咖啡"].includes(q.name)).map((q) => ({ id: String(q.id || uid()), name: String(q.name || "快捷").slice(0, 16), type: q.type === "income" || q.type === "transfer" ? q.type : "expense", amount: q.amount === "" || q.amount == null ? "" : round(Number(q.amount) || 0), categoryName: String(q.categoryName || "其他").slice(0, 20), note: String(q.note || "").slice(0, 80) })); }
+  function ensureDefaults(data) { DEFAULT_CATEGORIES.forEach(([name, type, color, icon]) => { if (!data.categories.some((c) => c.name === name && c.type === type)) data.categories.push({ id: uid(), name, type, color, icon }); }); DEFAULT_QUICK_ACTIONS.forEach((q) => { if (!data.quickActions.some((item) => item.name === q.name)) data.quickActions.push({ ...q }); }); }
+  function saveState() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+  function exportJson() { download(`e-account-backup-${stamp()}.json`, JSON.stringify(state, null, 2), "application/json;charset=utf-8"); }
+  function exportCsv() { const header = ["日期", "类型", "分类", "账户", "目标账户", "币种", "金额", "备注"]; const lines = filteredTransactions().map((t) => [t.date, typeLabel(t.type), categoryById(t.categoryId)?.name || "", accountById(t.accountId)?.name || "", accountById(t.targetAccountId)?.name || "", accountById(t.accountId)?.currency || BASE_CURRENCY, t.amount, t.note || ""].map(csv).join(",")); download(`e-account-transactions-${stamp()}.csv`, `\ufeff${header.join(",")}\n${lines.join("\n")}`, "text/csv;charset=utf-8"); }
+  function importJson(event) { const file = event.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { try { const parsed = JSON.parse(String(reader.result)); if (!parsed || typeof parsed !== "object") throw new Error("不是有效备份。"); state = normalizeState(parsed); saveState(); render(); notify("备份已导入。"); } catch (error) { notify(`导入失败：${error.message}`); } }; reader.readAsText(file); }
+  function resetAll() { if (!window.confirm("确认恢复默认数据？当前浏览器里的账本会被清空。")) return; state = normalizeState({}); saveState(); render(); notify("已恢复默认数据。"); }
+
+  function drawCharts() { if (view !== "reports") return; drawShare(); drawTrend(); drawWeek(); }
+  function drawShare() { const canvas = document.getElementById("shareChart"); if (!canvas) return; const ctx = setupCanvas(canvas, 300); const items = categoryTotals(monthTransactions(selectedMonth)).slice(0, 6); const total = items.reduce((sum, item) => sum + item.amount, 0); if (!total) return drawEmpty(ctx, "本月暂无支出"); const colors = ["#308df5", "#22c7d8", "#8b7cf6", "#ef5f79", "#f59e42", "#35d3a6"]; let start = -Math.PI / 2; items.forEach((item, i) => { const angle = item.amount / total * Math.PI * 2; ctx.beginPath(); ctx.moveTo(120, 128); ctx.arc(120, 128, 84, start, start + angle); ctx.closePath(); ctx.fillStyle = colors[i % colors.length]; ctx.fill(); start += angle; }); ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(120, 128, 44, 0, Math.PI * 2); ctx.fill(); ctx.font = "13px sans-serif"; items.forEach((item, i) => { ctx.fillStyle = colors[i % colors.length]; ctx.fillRect(240, 60 + i * 28, 12, 12); ctx.fillStyle = "#102033"; ctx.fillText(`${item.name} ${Math.round(item.amount / total * 100)}%`, 260, 70 + i * 28); }); }
+  function drawTrend() { const canvas = document.getElementById("trendChart"); if (!canvas) return; const ctx = setupCanvas(canvas, 300); const days = daysInMonth(selectedMonth); const daily = Array.from({ length: days }, (_, i) => ({ day: i + 1, income: 0, expense: 0 })); monthTransactions(selectedMonth).forEach((t) => { if (t.type === "transfer" || accountById(t.accountId)?.currency !== BASE_CURRENCY) return; daily[Number(t.date.slice(-2)) - 1][t.type] += t.amount; }); drawLines(ctx, daily, canvas.clientWidth || 600, 300); }
+  function drawWeek() { const canvas = document.getElementById("weekChart"); if (!canvas) return; const ctx = setupCanvas(canvas, 260); const days = Array.from({ length: 7 }, (_, i) => ({ date: toDate(addDays(new Date(), i - 6)), amount: 0 })); state.transactions.forEach((t) => { if (t.type !== "expense" || accountById(t.accountId)?.currency !== BASE_CURRENCY) return; const day = days.find((d) => d.date === t.date); if (day) day.amount += t.amount; }); const width = canvas.clientWidth || 420; const max = Math.max(100, ...days.map((d) => d.amount)); days.forEach((d, i) => { const x = 28 + i * ((width - 64) / 7); const h = d.amount / max * 150; ctx.fillStyle = "#76c7ff"; ctx.beginPath(); ctx.roundRect(x, 190 - h, 24, Math.max(3, h), 8); ctx.fill(); ctx.fillStyle = "#65758b"; ctx.font = "12px sans-serif"; ctx.fillText(d.date.slice(5).replace("-", "/"), x - 4, 222); }); }
+  function setupCanvas(canvas, height) { const ratio = window.devicePixelRatio || 1; const width = canvas.clientWidth || Number(canvas.width) || 420; canvas.width = Math.floor(width * ratio); canvas.height = Math.floor(height * ratio); const ctx = canvas.getContext("2d"); ctx.scale(ratio, ratio); ctx.clearRect(0, 0, width, height); return ctx; }
+  function drawLines(ctx, daily, width, height) { const pad = { l: 42, r: 18, t: 22, b: 34 }; const max = Math.max(100, ...daily.flatMap((d) => [d.income, d.expense])); ctx.strokeStyle = "#d8e8f4"; ctx.lineWidth = 1; for (let i = 0; i < 4; i++) { const y = pad.t + i * ((height - pad.t - pad.b) / 3); ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(width - pad.r, y); ctx.stroke(); } drawLine("income", "#1aa979"); drawLine("expense", "#ef5f79"); function drawLine(key, color) { ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.beginPath(); daily.forEach((d, i) => { const x = pad.l + (i / Math.max(1, daily.length - 1)) * (width - pad.l - pad.r); const y = height - pad.b - (d[key] / max) * (height - pad.t - pad.b); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }); ctx.stroke(); } }
+  function drawEmpty(ctx, text) { ctx.fillStyle = "#65758b"; ctx.font = "14px sans-serif"; ctx.fillText(text, 18, 38); }
+
+  function transactionsTable(items) { return `<table><thead><tr><th>日期</th><th>类型</th><th>分类/备注</th><th>账户</th><th class="num">金额</th><th></th></tr></thead><tbody>${items.map((t) => `<tr><td>${t.date}</td><td>${typePill(t.type)}</td><td>${escapeHtml(categoryById(t.categoryId)?.name || transferLabel(t))}<br><small>${escapeHtml(t.note || "")}</small></td><td>${escapeHtml(accountLine(t))}</td><td class="num ${amountClass(t)}">${signedAmount(t)}</td><td><div class="actions"><button class="mini" data-action="edit-transaction" data-id="${t.id}">编辑</button><button class="mini" data-action="delete-transaction" data-id="${t.id}">删除</button></div></td></tr>`).join("") || `<tr><td colspan="6">${empty("没有流水")}</td></tr>`}</tbody></table>`; }
+  function transactionCard(t) { return `<article class="item"><div><strong>${escapeHtml(categoryById(t.categoryId)?.name || transferLabel(t))}</strong><small>${t.date} · ${escapeHtml(accountLine(t))} ${t.note ? "· " + escapeHtml(t.note) : ""}</small></div><div class="${amountClass(t)}">${signedAmount(t)}</div></article>`; }
+  function simpleTransaction(t) { return `<div class="item"><div><strong>${escapeHtml(categoryById(t.categoryId)?.name || transferLabel(t))}</strong><small>${t.date} · ${escapeHtml(accountById(t.accountId)?.name || "未知账户")}</small></div><span class="${amountClass(t)}">${signedAmount(t)}</span></div>`; }
+  function accountChoice(a) { return `<button class="choice ${draft.accountId === a.id ? "active" : ""}" data-account="${a.id}" type="button"><i>${ACCOUNT_ICONS[a.type] || "账"}</i><span>${escapeHtml(a.name)}</span><small>${ACCOUNT_TYPES[a.type]} · ${a.currency}</small></button>`; }
+  function categoryChoice(c) { return `<button class="choice ${draft.categoryId === c.id ? "active" : ""}" data-category="${c.id}" type="button"><i style="background:${hexBg(c.color)};color:${c.color}">${escapeHtml(c.icon || c.name[0])}</i><span>${escapeHtml(c.name)}</span><small>${c.type === "income" ? "收入" : "支出"}分类</small></button>`; }
+  function creditTargetBlock() { const credits = state.accounts.filter((a) => a.type === "credit"); return `<div><div class="panel-header"><h3>还到哪张信用卡</h3><span>还款不进入消费报表</span></div><div class="icon-grid">${credits.map((a) => `<button class="choice ${draft.targetAccountId === a.id ? "active" : ""}" data-credit-target="${a.id}" type="button"><i>信</i><span>${escapeHtml(a.name)}</span><small>${a.currency}</small></button>`).join("") || empty("请先添加信用卡账户")}</div></div>`; }
+  function quickActionButton(q) { return `<button class="item" data-quick="${q.id}" type="button"><div><strong>${escapeHtml(q.name)}</strong><small>${typeLabel(q.type)}${q.amount ? ` · ${money(q.amount)}` : ""}</small></div><span>填入</span></button>`; }
+  function accountAssetItem(a) { const b = balances()[a.id] || 0; const isCredit = a.type === "credit"; return `<div class="item"><div><strong>${escapeHtml(a.name)}</strong><small>${ACCOUNT_TYPES[a.type]} · ${a.currency}${isCredit && a.dueDay ? ` · 还款日 ${a.dueDay} 日` : ""}</small></div><span class="${isCredit ? "debt" : ""}">${isCredit ? "应还 " : ""}${money(Math.max(0, b), a.currency)}</span></div>`; }
+  function creditReminderItems() { const b = balances(); const items = state.accounts.filter((a) => a.type === "credit"); return items.map((a) => `<div class="item"><div><strong>${escapeHtml(a.name)}</strong><small>账单日 ${a.billDay || "-"} · 还款日 ${a.dueDay || "-"}</small></div><span class="debt">${money(Math.max(0, b[a.id] || 0), a.currency)}</span></div>`).join("") || empty("暂无信用卡账户"); }
+  function accountManageItem(a) { return `<div class="item"><div><strong>${escapeHtml(a.name)}</strong><small>${ACCOUNT_TYPES[a.type]} · ${a.currency}</small></div><button class="mini" data-action="delete-account" data-id="${a.id}">删除</button></div>`; }
+  function categoryManageItem(c) { return `<div class="item"><div><strong>${escapeHtml(c.icon || "")} ${escapeHtml(c.name)}</strong><small>${typeLabel(c.type)} · 用于报表占比</small></div><button class="mini" data-action="delete-category" data-id="${c.id}">删除</button></div>`; }
+  function planItem(p) { return `<div class="item"><div><strong>${escapeHtml(p.name)}</strong><small>${p.date} · ${PLAN_REPEATS[p.repeat] || "不重复"} · ${PLAN_STATUSES[p.status] || "待处理"}</small></div><div class="actions"><span>${money(p.amount, p.currency)}</span>${p.status === "pending" ? `<button class="mini" data-action="pay-plan" data-id="${p.id}">记账</button>` : ""}<button class="mini" data-action="delete-plan" data-id="${p.id}">删除</button></div></div>`; }
+  function quickManageItem(q) { return `<div class="item"><div><strong>${escapeHtml(q.name)}</strong><small>${typeLabel(q.type)}${q.amount ? ` · ${money(q.amount)}` : ""}</small></div><button class="mini" data-action="delete-quick" data-id="${q.id}">删除</button></div>`; }
+  function categoryRank(transactions) { const items = categoryTotals(transactions); const max = Math.max(1, ...items.map((i) => i.amount)); return items.map((i) => `<div class="item"><div><strong>${escapeHtml(i.name)}</strong><small>${Math.round(i.amount / max * 100)}% 相对最高项</small></div><span>${money(i.amount, i.currency)}</span></div>`).join("") || empty("本月暂无支出"); }
+  function categoryTotals(transactions) { const totals = {}; transactions.forEach((t) => { if (t.type !== "expense") return; const a = accountById(t.accountId); if (a?.currency !== BASE_CURRENCY) return; const c = categoryById(t.categoryId); const key = c?.id || "unknown"; totals[key] ||= { name: c?.name || "未分类", amount: 0, currency: BASE_CURRENCY }; totals[key].amount += t.amount; }); return Object.values(totals).sort((a, b) => b.amount - a.amount); }
+  function metric(label, value, hint) { return `<article class="metric"><span>${label}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(hint)}</small></article>`; }
+  function compareMetric(label, current, prev, positiveGood) { const diff = round(current - prev); const good = diff === 0 || ((diff > 0) === positiveGood); return metric(label, money(current), `${diff >= 0 ? "+" : ""}${money(diff)} · ${good ? "趋势正常" : "需要关注"}`); }
+  function chartPanel(title, subtitle, id) { return `<section class="panel"><div class="panel-header"><h3>${title}</h3><span>${subtitle}</span></div><div class="canvas-wrap"><canvas id="${id}" width="620" height="300"></canvas></div></section>`; }
+  function selectField(label, id, options, selected) { return `<label class="field"><span>${label}</span><select id="${id}">${options.map(([v, text]) => `<option value="${escapeAttr(v)}" ${String(v) === String(selected) ? "selected" : ""}>${escapeHtml(text)}</option>`).join("")}</select></label>`; }
+  function choice(label, type, active, icon, hint) { return `<button class="choice ${active ? "active" : ""}" data-choice="${type}" type="button"><i>${icon}</i><span>${label}</span><small>${hint}</small></button>`; }
+  function typePill(type) { return `<span class="pill ${type}">${typeLabel(type)}</span>`; }
+  function typeLabel(type) { return { income: "收入", expense: "支出", transfer: "还款" }[type] || "支出"; }
+  function accountLine(t) { const a = accountById(t.accountId)?.name || "未知账户"; const b = accountById(t.targetAccountId)?.name; return b ? `${a} → ${b}` : a; }
+  function transferLabel(t) { return t.type === "transfer" ? "信用卡还款" : "未分类"; }
+  function amountClass(t) { if (t.type === "income") return "income"; if (t.type === "transfer") return "debt"; return "expense"; }
+  function signedAmount(t) { const cur = accountById(t.accountId)?.currency || BASE_CURRENCY; const sign = t.type === "income" ? "+" : t.type === "expense" ? "-" : ""; return `${sign}${money(t.amount, cur)}`; }
+  function biggestExpenseHint(items) { const biggest = items.filter((t) => t.type === "expense" && accountById(t.accountId)?.currency === BASE_CURRENCY).sort((a, b) => b.amount - a.amount)[0]; return biggest ? `最大单笔 ${money(biggest.amount)}` : "暂无人民币支出"; }
+  function newDraft(type) { return { type, amount: "", date: toDate(new Date()), accountId: preferredAccount(type), targetAccountId: type === "transfer" ? state?.accounts?.find((a) => a.type === "credit")?.id || "" : "", categoryId: type === "transfer" ? "" : state?.categories?.find((c) => c.type === type)?.id || "", note: localStorage.getItem(`${STORAGE_KEY}:last-note`) || "" }; }
+  function preferredAccount(type) { const stored = localStorage.getItem(`${STORAGE_KEY}:last-account`); if (state?.accounts?.some((a) => a.id === stored && (type !== "transfer" || a.type !== "credit"))) return stored; return state?.accounts?.find((a) => type !== "transfer" || a.type !== "credit")?.id || ""; }
+  function upsert(collection, item) { const index = state[collection].findIndex((x) => x.id === item.id); if (index >= 0) state[collection][index] = item; else state[collection].push(item); }
+  function accountById(id) { return state.accounts.find((a) => a.id === id); }
+  function categoryById(id) { return state.categories.find((c) => c.id === id); }
+  function expenseCategory() { return state.categories.find((c) => c.type === "expense"); }
+  function makeCategory([name, type, color, icon]) { return { id: uid(), name, type, color, icon }; }
+  function isOther(category) { return category && category.name === "其他"; }
+  function inferAccountType(name) { return /信用/.test(String(name)) ? "credit" : /现金/.test(String(name)) ? "cash" : /钱包|支付宝|微信/.test(String(name)) ? "wallet" : "debit"; }
+  function byDateDesc(a, b) { return b.date.localeCompare(a.date); }
+  function noop() {}
+  function value(id) { return document.getElementById(id)?.value || ""; }
+  function clampDay(value) { const n = Number(value); return n >= 1 && n <= 31 ? Math.round(n) : ""; }
+  function round(n) { return Math.round((Number(n) || 0) * 100) / 100; }
+  function money(n, currency = BASE_CURRENCY) { return `${currency} ${round(n).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
+  function formatCurrencyMap(map) { return Object.entries(map).filter(([, v]) => Math.abs(v) > 0.0001).map(([c, v]) => money(v, c)).join(" / ") || money(0); }
+  function toDate(date) { const d = new Date(date); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+  function toMonth(date) { const d = new Date(date); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; }
+  function previousMonth(month) { const [y, m] = month.split("-").map(Number); return toMonth(new Date(y, m - 2, 1)); }
+  function daysInMonth(month) { const [y, m] = month.split("-").map(Number); return new Date(y, m, 0).getDate(); }
+  function addDays(date, days) { const d = new Date(date); d.setDate(d.getDate() + days); return d; }
+  function validDate(value) { return /^\d{4}-\d{2}-\d{2}$/.test(String(value)); }
+  function pad(n) { return String(n).padStart(2, "0"); }
+  function uid() { return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`; }
+  function stamp() { return new Date().toISOString().slice(0, 10); }
+  function svg(id) { return `<svg aria-hidden="true"><use href="#${id}"></use></svg>`; }
+  function empty(text) { return `<div class="empty">${escapeHtml(text)}</div>`; }
+  function hexBg(color) { return `${color}1f`; }
+  function escapeHtml(value) { return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c])); }
+  function escapeAttr(value) { return escapeHtml(value); }
+  function csv(value) { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; }
+  function download(name, content, type) { const blob = new Blob([content], { type }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url); }
+  function notify(message) { const el = document.getElementById("notice"); if (!el) return; el.textContent = message; el.classList.add("show"); clearTimeout(notify.timer); notify.timer = setTimeout(() => el.classList.remove("show"), 2200); }
 })();

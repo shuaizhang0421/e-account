@@ -1,4 +1,4 @@
-const CACHE_NAME = "e-account-v1";
+const CACHE_NAME = "e-account-v2";
 const ASSETS = [
   "./",
   "./index.html",
@@ -7,7 +7,10 @@ const ASSETS = [
   "./manifest.webmanifest",
   "./icons/icon-180.png",
   "./icons/icon-192.png",
-  "./icons/icon-512.png"
+  "./icons/icon-512.png",
+  "./apple-touch-icon.png",
+  "./assets/visuals/avatar-abstract.png",
+  "./assets/visuals/flow-bg.jpg"
 ];
 
 self.addEventListener("install", (event) => {

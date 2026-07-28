@@ -729,11 +729,16 @@ canvas { width: 100%; min-width: 420px; height: 260px; display: block; }
   width: 100%;
   min-height: 46px;
 }
-.account-group + .account-group { margin-top: 18px; }
-.account-group-title { display: flex; align-items: center; gap: 9px; margin: 4px 0 10px; color: var(--muted); }
-.account-group-title span { padding: 5px 8px; color: #1769d2; border-radius: 999px; background: rgba(48,141,245,.11); font-size: 12px; }
-.account-group-title strong { color: var(--ink); }
-.account-group-title small { margin-left: auto; font-size: 12px; }
+.account-type-group + .account-type-group { margin-top: 24px; }
+.account-type-title, .account-bank-title { display: flex; align-items: center; gap: 9px; }
+.account-type-title { margin: 4px 0 13px; }
+.account-type-title span { padding: 6px 9px; color: #1769d2; border-radius: 999px; background: rgba(48,141,245,.11); font-size: 12px; font-weight: 800; }
+.account-type-title small, .account-bank-title small { margin-left: auto; color: var(--muted); font-size: 12px; }
+.account-bank-group { padding: 13px; border: 1px solid rgba(74,140,211,.14); border-radius: 14px; background: rgba(248,252,255,.56); }
+.account-bank-group + .account-bank-group { margin-top: 12px; }
+.account-bank-title { min-height: 28px; margin-bottom: 9px; }
+.account-bank-title strong { color: var(--ink); }
+.account-bank-title .actions { margin-left: 2px; }
 .mobile-filter-bar { display: none; }
 .sheet-backdrop, .filter-sheet { display: none; }
 
@@ -798,6 +803,18 @@ canvas { width: 100%; min-width: 420px; height: 260px; display: block; }
   background: #ef7283;
 }
 .calendar-day.today i { background: #fff; }
+.calendar-day i { min-width: 13px; padding: 0 3px; color: #fff; font-size: 9px; font-style: normal; line-height: 13px; text-align: center; }
+.reminder-calendar { display: grid; gap: 16px; }
+.calendar-controls { display: flex; align-items: center; gap: 8px; }
+.calendar-controls strong { min-width: 108px; text-align: center; }
+.calendar-weekdays, .calendar-month-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 7px; }
+.calendar-weekdays span { padding-bottom: 2px; color: var(--muted); font-size: 12px; text-align: center; }
+.calendar-month-grid .calendar-blank { min-height: 56px; }
+.calendar-month-grid .month-day { min-height: 56px; padding: 0; font-weight: 750; }
+.calendar-month-grid .month-day > span { font-size: 16px; }
+.calendar-month-grid .month-day.has-events { border-color: rgba(48,141,245,.34); background: linear-gradient(145deg, rgba(238,249,255,.94), rgba(243,239,255,.78)); }
+.calendar-month-grid .month-day.selected:not(.today) { color: #1769d2; border-color: rgba(30,125,232,.70); background: linear-gradient(145deg, rgba(214,244,255,.96), rgba(228,235,255,.94)); box-shadow: 0 7px 18px rgba(46,125,225,.16); }
+.calendar-selected { display: grid; gap: 10px; padding-top: 16px; border-top: 1px solid rgba(74,140,211,.14); }
 .reminder-list { display: grid; gap: 10px; }
 .reminder-row {
   min-height: 68px;
@@ -1208,6 +1225,13 @@ canvas { width: 100%; min-width: 420px; height: 260px; display: block; }
   }
   .calendar-day { min-height: 58px; border-radius: 10px; }
   .calendar-day strong { font-size: 16px; }
+  .calendar-controls { width: 100%; justify-content: space-between; }
+  .calendar-controls strong { min-width: 0; font-size: 14px; }
+  .calendar-month-grid { gap: 5px; }
+  .calendar-month-grid .calendar-blank, .calendar-month-grid .month-day { min-height: 43px; }
+  .calendar-month-grid .month-day > span { font-size: 14px; }
+  .account-bank-title { align-items: flex-start; flex-wrap: wrap; }
+  .account-bank-title .actions { width: 100%; margin-left: 0; justify-content: flex-start; }
   .reminder-row {
     grid-template-columns: 36px minmax(0, 1fr) auto;
     gap: 9px;

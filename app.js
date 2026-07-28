@@ -21,6 +21,8 @@
   ];
 
   let state = loadState();
+  // Obsolete draft-note cache from earlier versions must never prefill a new record.
+  localStorage.removeItem(`${STORAGE_KEY}:last-note`);
   syncInstallments();
   saveState();
   let view = "ledger";
@@ -36,6 +38,8 @@
   let accountEditingId = "";
   let accountFormDraft = null;
   let filterSheetOpen = false;
+  let reminderCalendarMonth = toMonth(new Date());
+  let reminderCalendarDate = toDate(new Date());
   const app = document.getElementById("app");
   const surface = new URLSearchParams(window.location.search).get("surface") === "desktop" ? "desktop" : "web";
 
@@ -131,7 +135,7 @@
 
   function assetsView() {
     const snapshot = assetSnapshot(); const activeInstallments = state.installments.filter((item) => !item.ended);
-    return `<section class="view active grid"><section class="insight-card asset-hero"><div><span class="eyebrow">本机账户 · 全部流水累计</span><h3>净资产</h3><strong>${formatCurrencyMap(snapshot.net)}</strong><small>资产减负债，多币种分别显示，不自动折算。</small></div><div class="insight-split"><article><span>资产</span><strong>${formatCurrencyMap(snapshot.assets)}</strong></article><article><span>负债</span><strong class="debt">${formatCurrencyMap(snapshot.debts)}</strong></article><article><span>待入账分期</span><strong>${activeInstallments.length} 笔</strong></article></div></section><div class="grid two"><section class="panel solid"><div class="panel-header"><h3>账户资产</h3><span>按银行归类</span></div>${accountGroupsHtml("asset")}</section><section class="panel solid"><div class="panel-header"><h3>信用卡提醒</h3><span>自动参考还款日</span></div><div class="list">${creditReminderItems()}</div></section></div><section class="panel"><div class="panel-header"><h3>信用卡分期</h3><span>${activeInstallments.length} 笔未结束</span></div><div class="list">${activeInstallments.map(installmentItem).join("") || empty("暂无信用卡分期")}</div></section></section>`;
+    return `<section class="view active grid"><section class="insight-card asset-hero"><div><span class="eyebrow">本机账户 · 全部流水累计</span><h3>净资产</h3><strong>${formatCurrencyMap(snapshot.net)}</strong><small>资产减含未来分期的总欠款，多币种分别显示，不自动折算。</small></div><div class="insight-split"><article><span>资产</span><strong>${formatCurrencyMap(snapshot.assets)}</strong></article><article><span>当前应还</span><strong class="debt">${formatCurrencyMap(snapshot.currentDebts)}</strong></article><article><span>含分期总欠款</span><strong class="debt">${formatCurrencyMap(snapshot.totalDebts)}</strong></article></div></section><div class="grid two"><section class="panel solid"><div class="panel-header"><h3>账户资产</h3><span>按类型、银行归类</span></div>${accountGroupsHtml("asset")}</section><section class="panel solid"><div class="panel-header"><h3>信用卡提醒</h3><span>自动参考还款日</span></div><div class="list">${creditReminderItems()}</div></section></div><section class="panel"><div class="panel-header"><h3>信用卡分期</h3><span>${activeInstallments.length} 笔未结束</span></div><div class="list">${activeInstallments.map(installmentItem).join("") || empty("暂无信用卡分期")}</div></section></section>`;
   }
 
   function meView() {
@@ -140,25 +144,74 @@
   }
 
   function reminderOverview() {
-    const pending = state.plans.filter((plan) => plan.status === "pending").sort((a, b) => a.date.localeCompare(b.date));
-    const credit = creditReminderData();
     const days = Array.from({ length: 7 }, (_, index) => addDays(new Date(), index));
+    const events = reminderEventsBetween(toDate(days[0]), toDate(days[days.length - 1]));
     const calendar = days.map((day, index) => {
-      const date = toDate(day);
-      const hasPlan = pending.some((plan) => plan.date === date);
-      return `<div class="calendar-day ${index === 0 ? "today" : ""}"><span>${["日", "一", "二", "三", "四", "五", "六"][day.getDay()]}</span><strong>${day.getDate()}</strong>${hasPlan ? "<i></i>" : ""}</div>`;
+      const date = toDate(day); const count = events.filter((item) => item.date === date).length;
+      return `<div class="calendar-day ${index === 0 ? "today" : ""}"><span>${["日", "一", "二", "三", "四", "五", "六"][day.getDay()]}</span><strong>${day.getDate()}</strong>${count ? `<i>${count}</i>` : ""}</div>`;
     }).join("");
-    const content = [...credit.slice(0, 2).map(creditReminderPreviewItem), ...pending.slice(0, 3).map(reminderPreviewItem)].join("") || `<div class="reminder-empty"><span>${svg("i-bell")}</span><div><strong>近期没有待处理事项</strong><small>可添加还款、房租或订阅续费提醒。</small></div><button class="mini" data-action="open-setting" data-panel="reminders" type="button">添加提醒</button></div>`;
-    return `<section class="panel reminder-overview"><div class="panel-header"><div><h3>近期提醒</h3><span>未来计划与还款安排</span></div><button class="mini" data-action="open-setting" data-panel="reminders" type="button">查看全部</button></div><div class="calendar-strip">${calendar}</div><div class="reminder-list">${content}</div></section>`;
+    const content = events.slice(0, 5).map(reminderEventItem).join("") || `<div class="reminder-empty"><span>${svg("i-bell")}</span><div><strong>近期没有待处理事项</strong><small>可添加还款、房租或订阅续费提醒。</small></div><button class="mini" data-action="open-setting" data-panel="reminders" type="button">添加提醒</button></div>`;
+    return `<section class="panel reminder-overview"><div class="panel-header"><div><h3>近期提醒</h3><span>未来计划、还款与分期安排</span></div><button class="mini" data-action="open-setting" data-panel="reminders" type="button">查看全部</button></div><div class="calendar-strip">${calendar}</div><div class="reminder-list">${content}</div></section>`;
   }
 
-  function reminderPreviewItem(plan) {
-    const diff = dateDistance(plan.date);
-    const timing = diff < 0 ? `已逾期 ${Math.abs(diff)} 天` : diff === 0 ? "今天到期" : `${diff} 天后`;
-    const account = accountById(plan.accountId);
-    return `<article class="reminder-row ${diff < 0 ? "overdue" : ""}"><span class="reminder-icon">${svg(plan.name.includes("信用卡") ? "i-credit-card" : "i-bell")}</span><div><strong>${escapeHtml(plan.name)}</strong><small>${plan.date} · ${timing}${account ? ` · ${escapeHtml(account.name)}` : ""}</small></div><div class="reminder-amount"><strong>${money(plan.amount, plan.currency)}</strong><span>${diff < 0 ? "逾期" : "待处理"}</span></div><button class="mini primary-mini" data-action="pay-plan" data-id="${escapeAttr(plan.id)}" type="button">记为流水</button></article>`;
+  function reminderEventItem(item) {
+    const diff = dateDistance(item.date);
+    const timing = diff < 0 ? `已逾期 ${Math.abs(diff)} 天` : diff === 0 ? "今天" : `${diff} 天后`;
+    const amount = item.amount > 0 ? money(item.amount, item.currency) : "待处理";
+    const action = item.kind === "credit"
+      ? `<button class="mini primary-mini" data-action="pay-credit" data-id="${escapeAttr(item.account.id)}" data-currency="${item.currency}" type="button">去还款</button>`
+      : item.kind === "plan"
+        ? `<button class="mini primary-mini" data-action="pay-plan" data-id="${escapeAttr(item.plan.id)}" type="button">记为流水</button>`
+        : `<button class="mini" data-view="assets" type="button">查看分期</button>`;
+    const icon = item.kind === "credit" ? "i-credit-card" : item.kind === "installment" ? "i-chart" : "i-bell";
+    return `<article class="reminder-row ${diff < 0 ? "overdue" : ""}"><span class="reminder-icon">${svg(icon)}</span><div><strong>${escapeHtml(item.title)}</strong><small>${item.date} · ${escapeHtml(item.detail)} · ${timing}</small></div><div class="reminder-amount"><strong>${amount}</strong><span>${item.kind === "credit" ? "应还" : item.kind === "installment" ? "待入账" : "待处理"}</span></div>${action}</article>`;
   }
-  function creditReminderPreviewItem(item) { return `<article class="reminder-row ${item.overdue ? "overdue" : ""}"><span class="reminder-icon">${svg("i-credit-card")}</span><div><strong>${escapeHtml(item.account.name)} · ${item.currency}</strong><small>${item.label}</small></div><div class="reminder-amount"><strong>${money(item.amount, item.currency)}</strong><span>应还</span></div><button class="mini primary-mini" data-action="pay-credit" data-id="${escapeAttr(item.account.id)}" data-currency="${item.currency}" type="button">去还款</button></article>`; }
+
+  function reminderCalendarView() {
+    const range = monthRange(reminderCalendarMonth); const events = reminderEventsForMonth(reminderCalendarMonth);
+    const firstDay = parseLocalDate(range.start).getDay(); const totalDays = daysInMonth(reminderCalendarMonth);
+    const blanks = Array.from({ length: firstDay }, () => `<span class="calendar-blank"></span>`).join("");
+    const days = Array.from({ length: totalDays }, (_, index) => {
+      const date = `${reminderCalendarMonth}-${pad(index + 1)}`; const count = events.filter((item) => item.date === date).length;
+      const classes = ["calendar-day", "month-day", date === toDate(new Date()) ? "today" : "", date === reminderCalendarDate ? "selected" : "", count ? "has-events" : ""].filter(Boolean).join(" ");
+      return `<button class="${classes}" data-action="select-reminder-date" data-date="${date}" type="button"><span>${index + 1}</span>${count ? `<i>${count}</i>` : ""}</button>`;
+    }).join("");
+    const selected = events.filter((item) => item.date === reminderCalendarDate);
+    const selectedLabel = reminderCalendarDate === toDate(new Date()) ? "今天" : reminderCalendarDate;
+    return `<section class="panel reminder-calendar"><div class="panel-header"><div><h3>提醒日历</h3><span>还款、计划与分期入账日</span></div><div class="calendar-controls"><button class="mini" data-action="calendar-prev" type="button">上月</button><strong>${reminderCalendarMonth.replace("-", " 年 ")} 月</strong><button class="mini" data-action="calendar-next" type="button">下月</button></div></div><div class="calendar-weekdays"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div><div class="calendar-month-grid">${blanks}${days}</div><div class="calendar-selected"><div class="panel-header"><h3>${selectedLabel}</h3><span>${selected.length} 项安排</span></div><div class="reminder-list">${selected.map(reminderEventItem).join("") || empty("这一天没有提醒事项")}</div></div></section>`;
+  }
+
+  function reminderEventsBetween(start, end) {
+    const months = []; for (let cursor = start.slice(0, 7); cursor <= end.slice(0, 7); cursor = nextMonth(cursor)) months.push(cursor);
+    return months.flatMap(reminderEventsForMonth).filter((item) => item.date >= start && item.date <= end).sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title, "zh-CN"));
+  }
+  function reminderEventsForMonth(month) { return [...planReminderEvents(month), ...creditReminderEvents(month), ...installmentReminderEvents(month)].sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title, "zh-CN")); }
+  function planReminderEvents(month) {
+    const range = monthRange(month); const steps = { monthly: 1, quarterly: 3, yearly: 12 };
+    return state.plans.filter((plan) => plan.status === "pending").flatMap((plan) => {
+      if (plan.repeat === "none") return plan.date >= range.start && plan.date <= range.end ? [{ kind: "plan", date: plan.date, title: plan.name, detail: accountDisplayName(accountById(plan.accountId)) || "未关联账户", amount: plan.amount, currency: plan.currency, plan }] : [];
+      const step = steps[plan.repeat]; const result = [];
+      for (let index = 0, date = plan.date; date <= range.end && index < 240; index += 1, date = addMonths(plan.date, index * step)) if (date >= range.start) result.push({ kind: "plan", date, title: plan.name, detail: `${PLAN_REPEATS[plan.repeat]} · ${accountDisplayName(accountById(plan.accountId)) || "未关联账户"}`, amount: plan.amount, currency: plan.currency, plan });
+      return result;
+    });
+  }
+  function creditReminderEvents(month) {
+    const balancesByAccount = balances(); const [year, numericMonth] = month.split("-").map(Number); const date = `${month}-${pad(Math.min(31, new Date(year, numericMonth, 0).getDate()))}`;
+    return state.accounts.filter((account) => account.type === "credit" && account.dueDay).flatMap((account) => account.currencies.map((currency) => {
+      const amount = Math.max(0, balancesByAccount[account.id]?.[currency] || 0); const dueDate = `${month}-${pad(Math.min(account.dueDay, new Date(year, numericMonth, 0).getDate()))}`;
+      return amount ? { kind: "credit", date: dueDate || date, title: `${accountDisplayName(account)} · ${currency}`, detail: `信用卡还款日 · 账单日 ${account.billDay || "-"}`, amount, currency, account } : null;
+    }).filter(Boolean));
+  }
+  function installmentReminderEvents(month) {
+    const range = monthRange(month);
+    return state.installments.filter((item) => !item.ended).flatMap((item) => Array.from({ length: item.count }, (_, index) => {
+      const period = index + 1; const date = addMonths(item.firstDate, index); const generated = state.transactions.some((transaction) => transaction.id === `${item.id}-p-${period}`);
+      if (date < range.start || date > range.end || generated || item.skippedPeriods.includes(period)) return null;
+      const amount = round(installmentPrincipal(item, index) + installmentFee(item, index));
+      return { kind: "installment", date, title: `${accountDisplayName(accountById(item.accountId)) || "信用卡分期"} · 第 ${period}/${item.count} 期`, detail: categoryById(item.categoryId)?.name || "未分类", amount, currency: item.currency, installment: item };
+    }).filter(Boolean));
+  }
+  function creditReminderPreviewItem(item) { return reminderEventItem({ kind: "credit", date: item.dueDate, title: `${accountDisplayName(item.account)} · ${item.currency}`, detail: item.label, amount: item.amount, currency: item.currency, account: item.account }); }
 
   function settingsDetailView() {
     const title = { security: "备份与隐私", accounts: "账户与卡片", categories: "分类规则", quick: "快捷入口", reminders: "提醒与计划", preferences: "外观与偏好" }[settingsPanel] || "我的";
@@ -167,7 +220,7 @@
       accounts: accountsManager(),
       categories: categoriesManager(),
       quick: quickManager(),
-      reminders: plansManager(),
+      reminders: `${reminderCalendarView()}${plansManager()}`,
       preferences: `<section class="panel"><div class="panel-header"><h3>偏好与维护</h3><span>谨慎操作</span></div><div class="grid two"><article class="item"><div><strong>默认货币</strong><small>${BASE_CURRENCY} · 当前版本不自动折算外币</small></div></article><article class="item"><div><strong>主题</strong><small>清爽高级 · 自由流线背景</small></div></article></div><div class="top-actions"><button class="btn danger" data-action="reset-all" type="button">恢复默认数据</button></div></section>`
     }[settingsPanel];
     return `<section class="view active grid"><button class="btn ghost" data-action="back-settings" type="button">返回我的</button><section class="page-title compact-page-title"><div><span class="page-kicker">E-Account</span><h2>${title}</h2></div></section>${body}</section>`;
@@ -201,7 +254,7 @@
     if (!el) return;
     if (el.dataset.choice) setDraftType(el.dataset.choice);
     if (el.dataset.account) setDraftAccount(el.dataset.account);
-    if (el.dataset.category) { draft.categoryId = el.dataset.category; render(); }
+    if (el.dataset.category) { syncDraftFromInputs(); draft.categoryId = el.dataset.category; render(); }
     if (el.dataset.creditTarget) { syncDraftFromInputs(); draft.targetAccountId = el.dataset.creditTarget; ensureDraftCurrencies(); render(); }
     if (el.dataset.targetAccount) { syncDraftFromInputs(); draft.targetAccountId = el.dataset.targetAccount; ensureDraftCurrencies(); render(); }
     if (el.dataset.currency) { syncDraftFromInputs(); draft.currency = el.dataset.currency; render(); }
@@ -212,12 +265,29 @@
     const action = el.dataset.action;
     if (!action) return;
     syncDraftFromInputs();
-    const actions = { "save-transaction": saveTransaction, "reset-draft": resetDraft, "parse-note": parseDraftNote, "clear-filters": clearFilters, "open-filter-sheet": () => { filterSheetOpen = true; render(); }, "close-filter-sheet": () => { filterSheetOpen = false; render(); }, "open-setting": () => { settingsPanel = el.dataset.panel || "home"; render(); }, "open-category-manager": () => { view = "me"; settingsPanel = "categories"; render(); }, "open-quick-manager": () => { view = "me"; settingsPanel = "quick"; render(); }, "back-settings": () => { settingsPanel = "home"; render(); }, "edit-transaction": () => editTransaction(el.dataset.id), "delete-transaction": () => deleteItem("transactions", el.dataset.id), "delete-account": () => deleteItem("accounts", el.dataset.id), "delete-category": () => deleteItem("categories", el.dataset.id), "delete-plan": () => deleteItem("plans", el.dataset.id), "delete-quick": () => deleteItem("quickActions", el.dataset.id), "pay-plan": () => payPlan(el.dataset.id), "skip-plan": () => setPlanStatus(el.dataset.id, "skipped"), "reopen-plan": () => setPlanStatus(el.dataset.id, "pending"), "pay-credit": () => startCreditPayment(el.dataset.id, el.dataset.currency), "stop-installment": () => stopInstallment(el.dataset.id), "skip-next-installment": () => skipNextInstallment(el.dataset.id), "save-account": saveAccount, "edit-account": () => editAccount(el.dataset.id), "cancel-account-edit": cancelAccountEdit, "toggle-account-currency": () => toggleAccountCurrency(el.dataset.currency), "move-account": () => moveAccount(el.dataset.id, Number(el.dataset.direction)), "add-category": addCategory, "add-plan": addPlan, "add-quick": addQuick, "export-json": exportJson, "export-csv": exportCsv, "reset-all": resetAll };
+    const actions = { "save-transaction": saveTransaction, "reset-draft": resetDraft, "parse-note": parseDraftNote, "clear-filters": clearFilters, "open-filter-sheet": () => { filterSheetOpen = true; render(); }, "close-filter-sheet": () => { filterSheetOpen = false; render(); }, "open-setting": () => { settingsPanel = el.dataset.panel || "home"; render(); }, "open-category-manager": () => { view = "me"; settingsPanel = "categories"; render(); }, "open-quick-manager": () => { view = "me"; settingsPanel = "quick"; render(); }, "back-settings": () => { settingsPanel = "home"; render(); }, "edit-transaction": () => editTransaction(el.dataset.id), "delete-transaction": () => deleteItem("transactions", el.dataset.id), "delete-account": () => deleteItem("accounts", el.dataset.id), "delete-category": () => deleteItem("categories", el.dataset.id), "delete-plan": () => deleteItem("plans", el.dataset.id), "delete-quick": () => deleteItem("quickActions", el.dataset.id), "pay-plan": () => payPlan(el.dataset.id), "skip-plan": () => setPlanStatus(el.dataset.id, "skipped"), "reopen-plan": () => setPlanStatus(el.dataset.id, "pending"), "pay-credit": () => startCreditPayment(el.dataset.id, el.dataset.currency), "stop-installment": () => stopInstallment(el.dataset.id), "skip-next-installment": () => skipNextInstallment(el.dataset.id), "save-account": saveAccount, "edit-account": () => editAccount(el.dataset.id), "cancel-account-edit": cancelAccountEdit, "toggle-account-currency": () => toggleAccountCurrency(el.dataset.currency), "move-account": () => moveAccount(el.dataset.id, Number(el.dataset.direction)), "add-category": addCategory, "add-plan": addPlan, "add-quick": addQuick, "calendar-prev": () => { reminderCalendarMonth = previousMonth(reminderCalendarMonth); reminderCalendarDate = `${reminderCalendarMonth}-01`; render(); }, "calendar-next": () => { reminderCalendarMonth = nextMonth(reminderCalendarMonth); reminderCalendarDate = `${reminderCalendarMonth}-01`; render(); }, "select-reminder-date": () => { reminderCalendarDate = el.dataset.date; render(); }, "move-bank": () => moveBank(el.dataset.type, el.dataset.bank, Number(el.dataset.direction)), "export-json": exportJson, "export-csv": exportCsv, "reset-all": resetAll };
     (actions[action] || noop)();
   });
 
   function syncDraftFromInputs() { const map = { "draft-amount": "amount", "draft-date": "date", "draft-note": "note", "draft-target-amount": "targetAmount", "draft-fee-amount": "feeAmount", "draft-first-date": "firstDate", "draft-installment-count": "installmentCount" }; Object.entries(map).forEach(([id, key]) => { const input = document.getElementById(id); if (input) draft[key] = key === "note" ? input.value.trim() : input.value; }); }
-  function setDraftType(type) { draft = newDraft(type); render(); }
+  function setDraftType(type) {
+    syncDraftFromInputs();
+    const previous = { ...draft }; const next = newDraft(type);
+    const eligible = (account) => account && (type === "installment" ? account.type === "credit" : ["transfer", "exchange"].includes(type) ? account.type !== "credit" : true);
+    const previousAccount = accountById(previous.accountId);
+    if (eligible(previousAccount)) {
+      next.accountId = previous.accountId;
+      next.currency = previousAccount.currencies.includes(previous.currency) ? previous.currency : previousAccount.currencies[0] || BASE_CURRENCY;
+      next.feeCurrency = previousAccount.currencies.includes(previous.feeCurrency) ? previous.feeCurrency : next.currency;
+    }
+    next.amount = previous.amount; next.date = previous.date; next.note = previous.note; next.firstDate = previous.firstDate || previous.date;
+    if (["expense", "installment"].includes(type) && categoryById(previous.categoryId)?.type === "expense") next.categoryId = previous.categoryId;
+    if (type === "income" && categoryById(previous.categoryId)?.type === "income") next.categoryId = previous.categoryId;
+    if (["transfer", "exchange"].includes(type)) { next.targetAmount = previous.targetAmount; next.feeAmount = previous.feeAmount; }
+    if (type === "transfer" && accountById(previous.targetAccountId)?.type === "credit") { next.targetAccountId = previous.targetAccountId; next.targetCurrency = accountById(previous.targetAccountId).currencies.includes(previous.targetCurrency) ? previous.targetCurrency : next.targetCurrency; }
+    if (type === "exchange" && eligible(accountById(previous.targetAccountId))) { next.targetAccountId = previous.targetAccountId; next.targetCurrency = accountById(previous.targetAccountId).currencies.includes(previous.targetCurrency) ? previous.targetCurrency : next.targetCurrency; }
+    draft = next; render();
+  }
   function setDraftAccount(accountId) { syncDraftFromInputs(); draft.accountId = accountId; ensureDraftCurrencies(); render(); }
   function ensureDraftCurrencies() { const source = accountById(draft.accountId); const target = accountById(draft.targetAccountId); if (!source?.currencies.includes(draft.currency)) draft.currency = source?.currencies[0] || BASE_CURRENCY; if (!source?.currencies.includes(draft.feeCurrency)) draft.feeCurrency = draft.currency; if (!target?.currencies.includes(draft.targetCurrency)) draft.targetCurrency = target?.currencies[0] || BASE_CURRENCY; }
   function saveTransaction() {
@@ -231,17 +301,32 @@
     state.transactions = state.transactions.filter((transaction) => transaction.id !== `${item.id}-fee`);
     upsert("transactions", item);
     if (item.feeAmount) upsertFee(item);
-    localStorage.setItem(`${STORAGE_KEY}:last-account`, item.accountId); if (item.categoryId) localStorage.setItem(`${STORAGE_KEY}:last-category:${item.type}`, item.categoryId); if (item.note) localStorage.setItem(`${STORAGE_KEY}:last-note`, item.note);
+    localStorage.setItem(`${STORAGE_KEY}:last-account`, item.accountId); if (item.categoryId) localStorage.setItem(`${STORAGE_KEY}:last-category:${item.type}`, item.categoryId);
     saveState(); editing = null; draft = newDraft("expense"); view = "ledger"; render(); notify(item.type === "exchange" ? "购汇已保存。" : "流水已保存。");
   }
   function upsertFee(parent) { const item = { id: `${parent.id}-fee`, type: "fee", date: parent.date, amount: parent.feeAmount, currency: parent.feeCurrency, accountId: parent.accountId, targetAccountId: "", targetAmount: 0, targetCurrency: "", exchangeRate: 0, feeAmount: 0, feeCurrency: "", categoryId: feeCategory()?.id || "", note: `${parent.type === "exchange" ? "购汇" : "跨币种还款"}手续费`, installmentId: "" }; upsert("transactions", item); }
   function editTransaction(id) { const item = state.transactions.find((t) => t.id === id); if (!item || item.type === "fee" || item.installmentId) return notify("自动生成流水请在分期或原交易中管理。"); editing = id; draft = { ...newDraft(item.type), ...item, feeAmount: item.feeAmount || "", firstDate: toDate(new Date()), installmentCount: 3 }; view = "record"; render(); }
   function syncAccountForm() { if (!accountFormDraft) accountFormDraft = newAccountForm(); const f = accountFormDraft; f.name = safeText(value("account-name").trim(), 50); f.type = ACCOUNT_TYPES[value("account-type")] ? value("account-type") : "debit"; f.bank = safeText(value("account-bank").trim(), 40); f.tail = safeText(value("account-tail").trim(), 12); f.note = safeText(value("account-note").trim(), 80); f.billDay = clampDay(value("account-bill-day")); f.dueDay = clampDay(value("account-due-day")); f.creditLimit = Math.max(0, round(value("account-credit-limit"))); app.querySelectorAll("[data-account-balance]").forEach((input) => { f.initialBalances[input.dataset.accountBalance] = round(input.value); }); }
-  function saveAccount() { syncAccountForm(); const f = accountFormDraft; if (!f.name || !f.currencies.length) return notify("请填写账户名称并至少选择一种币种。"); const item = { id: accountEditingId || uid(), name: f.name, type: f.type, bank: f.bank || "未归类机构", tail: f.tail, note: f.note, currencies: f.currencies, initialBalances: f.initialBalances, billDay: f.billDay, dueDay: f.dueDay, creditLimit: f.creditLimit, order: accountEditingId ? accountById(accountEditingId)?.order || 0 : nextAccountOrder(f.type, f.bank || "未归类机构") }; upsert("accounts", item); saveState(); accountEditingId = ""; accountFormDraft = newAccountForm(); render(); notify("账户已保存。"); }
+  function saveAccount() {
+    syncAccountForm(); const f = accountFormDraft; if (!f.name || !f.currencies.length) return notify("请填写账户名称并至少选择一种币种。");
+    const previous = accountEditingId ? accountById(accountEditingId) : null; const bank = f.bank || "未归类机构";
+    const sameBank = previous && previous.type === f.type && previous.bank === bank;
+    const item = { id: accountEditingId || uid(), name: f.name, type: f.type, bank, tail: f.tail, note: f.note, currencies: f.currencies, initialBalances: f.initialBalances, billDay: f.billDay, dueDay: f.dueDay, creditLimit: f.creditLimit, bankOrder: sameBank ? previous.bankOrder : nextBankOrder(f.type, bank), order: sameBank ? previous.order : nextAccountOrder(f.type, bank) };
+    upsert("accounts", item); normalizeBankOrders(state.accounts); saveState(); accountEditingId = ""; accountFormDraft = newAccountForm(); render(); notify("账户已保存。");
+  }
   function editAccount(id) { const account = accountById(id); if (!account) return; accountEditingId = id; accountFormDraft = { ...account, currencies: [...account.currencies], initialBalances: { ...account.initialBalances } }; render(); }
   function cancelAccountEdit() { accountEditingId = ""; accountFormDraft = newAccountForm(); render(); }
   function toggleAccountCurrency(currency) { syncAccountForm(); const list = accountFormDraft.currencies; if (list.includes(currency)) { if (list.length === 1) return notify("账户至少保留一种币种。"); const id = accountEditingId; const inUse = id && (state.transactions.some((item) => (item.accountId === id && item.currency === currency) || (item.targetAccountId === id && item.targetCurrency === currency)) || state.plans.some((item) => item.accountId === id && item.currency === currency) || state.installments.some((item) => item.accountId === id && item.currency === currency)); if (inUse) return notify("该币种已有流水、提醒或分期，不能移除。"); accountFormDraft.currencies = list.filter((item) => item !== currency); delete accountFormDraft.initialBalances[currency]; } else { accountFormDraft.currencies.push(currency); accountFormDraft.initialBalances[currency] = 0; } render(); }
-  function moveAccount(id, direction) { const current = accountById(id); if (!current) return; const peers = orderedAccounts().filter((item) => item.type === current.type && item.bank === current.bank); const index = peers.findIndex((item) => item.id === id); const target = peers[index + direction]; if (!target) return; [current.order, target.order] = [target.order, current.order]; saveState(); render(); }
+  function moveAccount(id, direction) {
+    const current = accountById(id); if (!current) return; const peers = orderedAccounts().filter((item) => item.type === current.type && item.bank === current.bank);
+    const index = peers.findIndex((item) => item.id === id); const target = peers[index + direction]; if (!target) return;
+    [current.order, target.order] = [target.order, current.order]; saveState(); render();
+  }
+  function moveBank(type, bank, direction) {
+    const groups = bankGroupsForType(type); const index = groups.findIndex((group) => group.bank === bank); const target = groups[index + direction]; const current = groups[index];
+    if (!current || !target) return; const currentOrder = current.accounts[0].bankOrder; const targetOrder = target.accounts[0].bankOrder;
+    current.accounts.forEach((account) => account.bankOrder = targetOrder); target.accounts.forEach((account) => account.bankOrder = currentOrder); saveState(); render();
+  }
   function addCategory() { const name = safeText(value("category-name").trim(), 30); if (!name) return notify("分类名称不能为空。"); const color = /^#[0-9a-fA-F]{6}$/.test(value("category-color")) ? value("category-color") : "#308df5"; state.categories.push({ id: uid(), name, type: value("category-type") === "income" ? "income" : "expense", color, icon: safeText(value("category-icon").trim(), 2) || name.slice(0, 1) }); saveState(); render(); notify("分类已新增。"); }
   function addPlan() { const name = safeText(value("plan-name").trim(), 40); const amount = round(Number(value("plan-amount")) || 0); const account = accountById(value("plan-account")); const category = categoryById(value("plan-category")); const currency = CURRENCIES.includes(value("plan-currency")) ? value("plan-currency") : BASE_CURRENCY; if (!name || amount <= 0) return notify("请填写提醒名称和金额。"); if (!account || !account.currencies.includes(currency) || !category || category.type !== "expense") return notify("请选择支持该币种的账户和支出分类。"); const repeat = PLAN_REPEATS[value("plan-repeat")] ? value("plan-repeat") : "none"; const date = validDate(value("plan-date")) ? value("plan-date") : toDate(new Date()); state.plans.push({ id: uid(), name, amount, currency, accountId: account.id, categoryId: category.id, date, repeat, status: "pending", note: safeText(value("plan-note").trim(), 80) }); saveState(); render(); notify("提醒已新增。"); }
   function addQuick() { const name = safeText(value("quick-name").trim(), 16); if (!name) return notify("快捷入口名称不能为空。"); const type = ["expense", "income", "transfer"].includes(value("quick-type")) ? value("quick-type") : "expense"; const rawAmount = value("quick-amount"); const amount = rawAmount === "" ? "" : Math.max(0, round(rawAmount)); state.quickActions.push({ id: uid(), name, type, amount, categoryName: "其他", note: safeText(value("quick-note").trim(), 80) }); saveState(); render(); notify("快捷入口已新增。"); }
@@ -304,7 +389,24 @@
     });
     return result;
   }
-  function assetSnapshot() { const b = balances(); const assets = {}, debts = {}, net = {}; state.accounts.forEach((a) => a.currencies.forEach((cur) => { assets[cur] ||= 0; debts[cur] ||= 0; const value = b[a.id]?.[cur] || 0; if (a.type === "credit") debts[cur] += Math.max(0, value); else assets[cur] += value; })); Object.keys({ ...assets, ...debts }).forEach((cur) => net[cur] = round((assets[cur] || 0) - (debts[cur] || 0))); return { assets, debts, net, balances: b }; }
+  function assetSnapshot() {
+    const balancesByAccount = balances(); const assets = {}, currentDebts = {}, futureInstallments = {}, totalDebts = {}, net = {};
+    state.accounts.forEach((account) => account.currencies.forEach((currency) => {
+      assets[currency] ||= 0; currentDebts[currency] ||= 0;
+      const value = balancesByAccount[account.id]?.[currency] || 0;
+      if (account.type === "credit") currentDebts[currency] += Math.max(0, value); else assets[currency] += value;
+    }));
+    state.installments.filter((item) => !item.ended).forEach((item) => Array.from({ length: item.count }, (_, index) => {
+      const period = index + 1; const generated = state.transactions.some((transaction) => transaction.id === `${item.id}-p-${period}`);
+      if (generated || item.skippedPeriods.includes(period)) return;
+      futureInstallments[item.currency] = round((futureInstallments[item.currency] || 0) + installmentPrincipal(item, index) + installmentFee(item, index));
+    }));
+    Object.keys({ ...assets, ...currentDebts, ...futureInstallments }).forEach((currency) => {
+      totalDebts[currency] = round((currentDebts[currency] || 0) + (futureInstallments[currency] || 0));
+      net[currency] = round((assets[currency] || 0) - totalDebts[currency]);
+    });
+    return { assets, currentDebts, futureInstallments, totalDebts, net, balances: balancesByAccount };
+  }
 
   function loadState() { try { const raw = localStorage.getItem(STORAGE_KEY); return normalizeState(raw ? JSON.parse(raw) : {}); } catch (_error) { return normalizeState({}); } }
   function normalizeState(data) {
@@ -312,7 +414,7 @@
     const accounts = Array.isArray(data.accounts) && data.accounts.length ? data.accounts.slice(0, 500) : defaultAccounts;
     const categories = Array.isArray(data.categories) && data.categories.length ? data.categories.slice(0, 500) : DEFAULT_CATEGORIES.map(makeCategory);
     const normalized = {
-      version: 4,
+      version: 5,
       accounts: accounts.map((a, index) => normalizeAccount(a, index)),
       categories: categories.map((c) => ({ id: safeText(c.id || uid(), 120), name: safeText(c.name || "未命名分类", 30), type: c.type === "income" ? "income" : "expense", color: /^#[0-9a-fA-F]{6}$/.test(c.color) ? c.color : "#308df5", icon: safeText(c.icon || c.name || "账", 2) })),
       budgets: Array.isArray(data.budgets) ? data.budgets.slice(0, 1000) : [],
@@ -322,18 +424,19 @@
       installments: Array.isArray(data.installments) ? data.installments.slice(0, 10000).map(normalizeInstallment) : []
     };
     if (!normalized.categories.some((c) => c.type === "expense" && c.name === "手续费")) normalized.categories.push({ id: "category-fee", name: "手续费", type: "expense", color: "#64748b", icon: "费" });
+    normalizeBankOrders(normalized.accounts);
     migrateBudgets(normalized, data);
     return normalized;
   }
   function migrateBudgets(data, original) { if (Array.isArray(original.plans) && original.plans.length) return; if (!Array.isArray(original.budgets)) return; original.budgets.slice(0, 1000).forEach((budget) => { const category = data.categories.find((c) => c.id === safeText(budget.categoryId, 120)); data.plans.push({ id: `plan-${safeText(budget.id || uid(), 120)}`, name: category?.name ? `${category.name}计划` : "计划支出", amount: Math.max(0, round(budget.amount)), currency: BASE_CURRENCY, accountId: data.accounts[0]?.id || "", categoryId: safeText(budget.categoryId, 120), date: /^\d{4}-\d{2}$/.test(String(budget.month)) ? `${budget.month}-01` : toDate(new Date()), repeat: "none", status: "pending", note: "由旧预算数据迁移" }); }); }
-  function normalizeAccount(a, index) { const legacy = CURRENCIES.includes(a.currency) ? a.currency : BASE_CURRENCY; const currencies = [...new Set((Array.isArray(a.currencies) && a.currencies.length ? a.currencies : [legacy]).filter((c) => CURRENCIES.includes(c)))]; const list = currencies.length ? currencies : [BASE_CURRENCY]; const initialBalances = {}; list.forEach((currency) => initialBalances[currency] = round(a.initialBalances?.[currency] ?? (currency === legacy ? a.initialBalance : 0))); return { id: safeText(a.id || uid(), 120), name: safeText(a.name || "未命名账户", 50), type: ACCOUNT_TYPES[a.type] ? a.type : inferAccountType(a.name), bank: safeText(a.bank || inferBank(a.name) || "未归类机构", 40), tail: safeText(a.tail || "", 12), note: safeText(a.note || "", 80), currencies: list, initialBalances, billDay: clampDay(a.billDay), dueDay: clampDay(a.dueDay), creditLimit: Math.max(0, round(a.creditLimit)), order: Number.isFinite(Number(a.order)) ? Number(a.order) : index }; }
+  function normalizeAccount(a, index) { const legacy = CURRENCIES.includes(a.currency) ? a.currency : BASE_CURRENCY; const currencies = [...new Set((Array.isArray(a.currencies) && a.currencies.length ? a.currencies : [legacy]).filter((c) => CURRENCIES.includes(c)))]; const list = currencies.length ? currencies : [BASE_CURRENCY]; const initialBalances = {}; list.forEach((currency) => initialBalances[currency] = round(a.initialBalances?.[currency] ?? (currency === legacy ? a.initialBalance : 0))); return { id: safeText(a.id || uid(), 120), name: safeText(a.name || "未命名账户", 50), type: ACCOUNT_TYPES[a.type] ? a.type : inferAccountType(a.name), bank: safeText(a.bank || inferBank(a.name) || "未归类机构", 40), tail: safeText(a.tail || "", 12), note: safeText(a.note || "", 80), currencies: list, initialBalances, billDay: clampDay(a.billDay), dueDay: clampDay(a.dueDay), creditLimit: Math.max(0, round(a.creditLimit)), bankOrder: Number.isFinite(Number(a.bankOrder)) ? Number(a.bankOrder) : index, order: Number.isFinite(Number(a.order)) ? Number(a.order) : index }; }
   function normalizeTransaction(t, sourceAccounts) { const source = sourceAccounts.find((a) => a.id === t.accountId); const target = sourceAccounts.find((a) => a.id === t.targetAccountId); const currency = CURRENCIES.includes(t.currency) ? t.currency : CURRENCIES.includes(source?.currency) ? source.currency : BASE_CURRENCY; const targetCurrency = CURRENCIES.includes(t.targetCurrency) ? t.targetCurrency : CURRENCIES.includes(target?.currency) ? target.currency : currency; const type = ["income", "transfer", "exchange", "fee"].includes(t.type) ? t.type : "expense"; return { id: safeText(t.id || uid(), 120), type, date: validDate(t.date) ? t.date : toDate(new Date()), amount: Math.max(0, round(t.amount)), currency, accountId: safeText(t.accountId, 120), targetAccountId: safeText(t.targetAccountId, 120), targetAmount: Math.max(0, round(t.targetAmount ?? (type === "transfer" ? t.amount : 0))), targetCurrency, exchangeRate: Math.max(0, round(t.exchangeRate)), feeAmount: Math.max(0, round(t.feeAmount)), feeCurrency: CURRENCIES.includes(t.feeCurrency) ? t.feeCurrency : "", categoryId: safeText(t.categoryId, 120), note: safeText(t.note, 80), installmentId: safeText(t.installmentId, 120) }; }
   function normalizeInstallment(item) { return { id: safeText(item.id || uid(), 120), accountId: safeText(item.accountId, 120), currency: CURRENCIES.includes(item.currency) ? item.currency : BASE_CURRENCY, totalAmount: Math.max(0, round(item.totalAmount)), count: Math.min(120, Math.max(2, Math.round(item.count || 2))), firstDate: validDate(item.firstDate) ? item.firstDate : toDate(new Date()), categoryId: safeText(item.categoryId, 120), note: safeText(item.note, 80), feeTotal: Math.max(0, round(item.feeTotal)), skippedPeriods: [...new Set((Array.isArray(item.skippedPeriods) ? item.skippedPeriods : []).map(Number).filter((period) => Number.isInteger(period) && period >= 1 && period <= Math.max(2, Math.round(item.count || 2))))], ended: Boolean(item.ended) }; }
   function normalizePlan(p) { return { id: safeText(p.id || uid(), 120), name: safeText(p.name || "提醒", 40), amount: Math.max(0, round(p.amount)), currency: CURRENCIES.includes(p.currency) ? p.currency : BASE_CURRENCY, accountId: safeText(p.accountId, 120), categoryId: safeText(p.categoryId, 120), date: validDate(p.date) ? p.date : toDate(new Date()), repeat: PLAN_REPEATS[p.repeat] ? p.repeat : "none", status: PLAN_STATUSES[p.status] ? p.status : "pending", note: safeText(p.note, 80) }; }
   function normalizeQuickActions(input) { const source = Array.isArray(input) ? input.slice(0, 200) : DEFAULT_QUICK_ACTIONS; return source.filter((q) => q && typeof q === "object" && !["早餐", "咖啡"].includes(q.name)).map((q) => ({ id: safeText(q.id || uid(), 120), name: safeText(q.name || "快捷", 16), type: q.type === "income" || q.type === "transfer" ? q.type : "expense", amount: q.amount === "" || q.amount == null ? "" : Math.max(0, round(q.amount)), categoryName: safeText(q.categoryName || "其他", 20), note: safeText(q.note, 80) })); }
   function saveState() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
   function exportJson() { download(`e-account-backup-${stamp()}.json`, JSON.stringify(state, null, 2), "application/json;charset=utf-8"); }
-  function exportCsv() { const header = ["日期", "类型", "分类", "账户", "目标账户", "付款币种", "付款金额", "目标币种", "目标金额", "实际汇率", "手续费", "手续费币种", "分期ID", "备注"]; const lines = filteredTransactions().map((t) => [t.date, typeLabel(t.type), categoryById(t.categoryId)?.name || transferLabel(t), accountById(t.accountId)?.name || "", accountById(t.targetAccountId)?.name || "", t.currency, t.amount, t.targetCurrency, t.targetAmount, t.exchangeRate, t.feeAmount, t.feeCurrency, t.installmentId, t.note || ""].map(csv).join(",")); download(`e-account-transactions-${stamp()}.csv`, `\ufeff${header.join(",")}\n${lines.join("\n")}`, "text/csv;charset=utf-8"); }
+  function exportCsv() { const header = ["日期", "类型", "分类", "账户", "目标账户", "付款币种", "付款金额", "目标币种", "目标金额", "实际汇率", "手续费", "手续费币种", "分期ID", "备注"]; const lines = filteredTransactions().map((t) => [t.date, typeLabel(t.type), categoryById(t.categoryId)?.name || transferLabel(t), accountDisplayName(accountById(t.accountId)), accountDisplayName(accountById(t.targetAccountId)), t.currency, t.amount, t.targetCurrency, t.targetAmount, t.exchangeRate, t.feeAmount, t.feeCurrency, t.installmentId, t.note || ""].map(csv).join(",")); download(`e-account-transactions-${stamp()}.csv`, `\ufeff${header.join(",")}\n${lines.join("\n")}`, "text/csv;charset=utf-8"); }
   function importJson(event) { const input = event.target; const file = input.files[0]; if (!file) return; if (file.size > 5 * 1024 * 1024) { input.value = ""; return notify("备份文件不能超过 5 MB。"); } const reader = new FileReader(); reader.onload = () => { try { const parsed = JSON.parse(String(reader.result)); const known = ["accounts", "categories", "transactions", "plans", "budgets", "quickActions", "templates"]; if (!parsed || Array.isArray(parsed) || typeof parsed !== "object" || !known.some((key) => Array.isArray(parsed[key]))) throw new Error("不是有效的 E-Account 备份。"); state = normalizeState(parsed); saveState(); render(); notify("备份已导入。"); } catch (error) { notify(`导入失败：${safeText(error.message, 120)}`); } finally { input.value = ""; } }; reader.onerror = () => { input.value = ""; notify("导入失败：无法读取备份文件。"); }; reader.readAsText(file); }
   function resetAll() { if (!window.confirm("确认恢复默认数据？当前浏览器里的账本会被清空。")) return; state = normalizeState({}); saveState(); render(); notify("已恢复默认数据。"); }
 
@@ -347,16 +450,16 @@
 
   function transactionsTable(items) { return `<table><thead><tr><th>日期</th><th>类型</th><th>分类/备注</th><th>账户</th><th>币种</th><th class="num">金额</th><th></th></tr></thead><tbody>${items.map((t) => `<tr><td>${t.date}</td><td>${typePill(t.type)}</td><td>${escapeHtml(categoryById(t.categoryId)?.name || transferLabel(t))}<br><small>${escapeHtml(t.note || "")}</small></td><td>${escapeHtml(accountLine(t))}</td><td>${escapeHtml(t.targetCurrency && t.targetCurrency !== t.currency ? `${t.currency} → ${t.targetCurrency}` : t.currency)}</td><td class="num ${amountClass(t)}">${signedAmount(t)}</td><td><div class="actions">${t.installmentId || t.type === "fee" ? "" : `<button class="mini" data-action="edit-transaction" data-id="${escapeAttr(t.id)}">编辑</button>`}<button class="mini" data-action="delete-transaction" data-id="${escapeAttr(t.id)}">删除</button></div></td></tr>`).join("") || `<tr><td colspan="7">${empty("没有流水")}</td></tr>`}</tbody></table>`; }
   function transactionCard(t) { return `<article class="item"><div><strong>${escapeHtml(categoryById(t.categoryId)?.name || transferLabel(t))}</strong><small>${t.date} · ${escapeHtml(accountLine(t))} · ${escapeHtml(t.targetCurrency && t.targetCurrency !== t.currency ? `${t.currency} → ${t.targetCurrency}` : t.currency)} ${t.note ? "· " + escapeHtml(t.note) : ""}</small></div><div class="${amountClass(t)}">${signedAmount(t)}</div></article>`; }
-  function simpleTransaction(t) { return `<div class="item"><div><strong>${escapeHtml(categoryById(t.categoryId)?.name || transferLabel(t))}</strong><small>${t.date} · ${escapeHtml(accountById(t.accountId)?.name || "未知账户")}</small></div><span class="${amountClass(t)}">${signedAmount(t)}</span></div>`; }
-  function accountChoice(a, activeId = draft.accountId, mode = "account") { return `<button class="choice ${activeId === a.id ? "active" : ""}" data-${mode}="${escapeAttr(a.id)}" type="button"><i>${svg(accountIcon(a))}</i><span>${escapeHtml(a.name)}</span><small>${escapeHtml(a.bank || "未归类")} · ${a.currencies.join("/")}</small></button>`; }
+  function simpleTransaction(t) { return `<div class="item"><div><strong>${escapeHtml(categoryById(t.categoryId)?.name || transferLabel(t))}</strong><small>${t.date} · ${escapeHtml(accountDisplayName(accountById(t.accountId)) || "未知账户")}</small></div><span class="${amountClass(t)}">${signedAmount(t)}</span></div>`; }
+  function accountChoice(a, activeId = draft.accountId, mode = "account") { return `<button class="choice ${activeId === a.id ? "active" : ""}" data-${mode}="${escapeAttr(a.id)}" type="button"><i>${svg(accountIcon(a))}</i><span>${escapeHtml(accountLabel(a))}</span><small>${escapeHtml(a.bank || "未归类")} · ${a.currencies.join("/")}</small></button>`; }
   function categoryChoice(c) { return `<button class="choice ${draft.categoryId === c.id ? "active" : ""}" data-category="${escapeAttr(c.id)}" type="button"><i style="background:${hexBg(c.color)};color:${c.color}">${svg(categoryIcon(c))}</i><span>${escapeHtml(c.name)}</span><small>${c.type === "income" ? "收入" : "支出"}分类</small></button>`; }
   function accountIcon(account) { return ({ cash: "i-banknote", debit: "i-card", credit: "i-credit-card", wallet: "i-wallet", other: "i-grid" })[account.type] || "i-wallet"; }
   function categoryIcon(category) { const names = { 餐饮: "i-utensils", 交通: "i-train", 购物: "i-bag", 学习: "i-book-open", 医疗: "i-heart-pulse", 住房: "i-house", 娱乐: "i-sparkles", 工资: "i-arrow-up", 奖学金: "i-arrow-up", 兼职: "i-arrow-up", 理财: "i-arrow-up", 其他: "i-grid" }; return names[category.name] || (category.type === "income" ? "i-arrow-up" : "i-grid"); }
   function quickActionButton(q) { return `<button class="item" data-quick="${escapeAttr(q.id)}" type="button"><div><strong>${escapeHtml(q.name)}</strong><small>${typeLabel(q.type)}${q.amount ? ` · ${money(q.amount)}` : ""}</small></div><span>填入</span></button>`; }
-  function accountAssetItem(a) { const b = balances()[a.id] || {}; const credit = a.type === "credit"; return `<div class="item"><div><strong>${escapeHtml(a.name)}${a.tail ? ` · ${escapeHtml(a.tail)}` : ""}</strong><small>${ACCOUNT_TYPES[a.type]}${credit && a.dueDay ? ` · 还款日 ${a.dueDay} 日` : ""} · ${a.currencies.join("/")}</small></div><span class="${credit ? "debt" : ""}">${a.currencies.map((currency) => money(credit ? Math.max(0, b[currency] || 0) : b[currency] || 0, currency)).join("<br>")}</span></div>`; }
-  function creditReminderData() { const b = balances(); const today = new Date(); const day = today.getDate(); return state.accounts.filter((account) => account.type === "credit" && account.dueDay).flatMap((account) => account.currencies.map((currency) => { const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), Math.min(account.dueDay, new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate())); const overdue = day > account.dueDay; const dueDate = overdue ? toDate(new Date(today.getFullYear(), today.getMonth() + 1, Math.min(account.dueDay, new Date(today.getFullYear(), today.getMonth() + 2, 0).getDate()))) : toDate(dueThisMonth); return { account, currency, amount: Math.max(0, b[account.id]?.[currency] || 0), overdue, label: `账单日 ${account.billDay || "-"} · ${overdue ? "下次" : "本期"}还款日 ${dueDate}` }; }).filter((item) => item.amount > 0)); }
-  function creditReminderItems() { return creditReminderData().map((item) => `<div class="item"><div><strong>${escapeHtml(item.account.name)} · ${item.currency}</strong><small>${item.label}</small></div><div class="actions"><span class="debt">${money(item.amount, item.currency)}</span><button class="mini primary-mini" data-action="pay-credit" data-id="${escapeAttr(item.account.id)}" data-currency="${item.currency}">去还款</button></div></div>`).join("") || empty("暂无待还信用卡"); }
-  function accountManageItem(a) { const peers = orderedAccounts().filter((item) => item.type === a.type && item.bank === a.bank); const index = peers.findIndex((item) => item.id === a.id); return `<div class="item"><div><strong>${escapeHtml(a.name)}${a.tail ? ` · ${escapeHtml(a.tail)}` : ""}</strong><small>${a.currencies.join(" / ")}${a.type === "credit" ? ` · 还款日 ${a.dueDay || "-"} 日` : ""}</small></div><div class="actions"><button class="mini" data-action="move-account" data-id="${escapeAttr(a.id)}" data-direction="-1" ${index <= 0 ? "disabled" : ""}>上移</button><button class="mini" data-action="move-account" data-id="${escapeAttr(a.id)}" data-direction="1" ${index >= peers.length - 1 ? "disabled" : ""}>下移</button><button class="mini" data-action="edit-account" data-id="${escapeAttr(a.id)}">编辑</button><button class="mini" data-action="delete-account" data-id="${escapeAttr(a.id)}">删除</button></div></div>`; }
+  function accountAssetItem(a) { const b = balances()[a.id] || {}; const credit = a.type === "credit"; const future = futureInstallmentDebtByAccount(a.id); const current = a.currencies.map((currency) => money(credit ? Math.max(0, b[currency] || 0) : b[currency] || 0, currency)).join("<br>"); const total = credit ? a.currencies.map((currency) => money(Math.max(0, (b[currency] || 0) + (future[currency] || 0)), currency)).join("<br>") : ""; return `<div class="item"><div><strong>${escapeHtml(accountLabel(a))}</strong><small>${credit && a.dueDay ? `还款日 ${a.dueDay} 日 · ` : ""}${a.currencies.join("/")}</small></div><span class="${credit ? "debt" : ""}">${credit ? `当前 ${current}${Object.values(future).some(Boolean) ? `<br><small>含分期 ${total}</small>` : ""}` : current}</span></div>`; }
+  function creditReminderData() { const b = balances(); const today = new Date(); const day = today.getDate(); return state.accounts.filter((account) => account.type === "credit" && account.dueDay).flatMap((account) => account.currencies.map((currency) => { const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), Math.min(account.dueDay, new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate())); const overdue = day > account.dueDay; const dueDate = overdue ? toDate(new Date(today.getFullYear(), today.getMonth() + 1, Math.min(account.dueDay, new Date(today.getFullYear(), today.getMonth() + 2, 0).getDate()))) : toDate(dueThisMonth); return { account, currency, amount: Math.max(0, b[account.id]?.[currency] || 0), dueDate, overdue, label: `账单日 ${account.billDay || "-"} · ${overdue ? "下次" : "本期"}还款日 ${dueDate}` }; }).filter((item) => item.amount > 0)); }
+  function creditReminderItems() { return creditReminderData().map((item) => `<div class="item"><div><strong>${escapeHtml(accountLabel(item.account))} · ${item.currency}</strong><small>${item.label}</small></div><div class="actions"><span class="debt">${money(item.amount, item.currency)}</span><button class="mini primary-mini" data-action="pay-credit" data-id="${escapeAttr(item.account.id)}" data-currency="${item.currency}">去还款</button></div></div>`).join("") || empty("暂无待还信用卡"); }
+  function accountManageItem(a) { const peers = orderedAccounts().filter((item) => item.type === a.type && item.bank === a.bank); const index = peers.findIndex((item) => item.id === a.id); return `<div class="item account-manage-item"><div><strong>${escapeHtml(accountLabel(a))}</strong><small>${a.currencies.join(" / ")}${a.type === "credit" ? ` · 还款日 ${a.dueDay || "-"} 日` : ""}</small></div><div class="actions"><button class="mini" data-action="move-account" data-id="${escapeAttr(a.id)}" data-direction="-1" ${index <= 0 ? "disabled" : ""}>上移</button><button class="mini" data-action="move-account" data-id="${escapeAttr(a.id)}" data-direction="1" ${index >= peers.length - 1 ? "disabled" : ""}>下移</button><button class="mini" data-action="edit-account" data-id="${escapeAttr(a.id)}">编辑</button><button class="mini" data-action="delete-account" data-id="${escapeAttr(a.id)}">删除</button></div></div>`; }
   function categoryManageItem(c) { return `<div class="item"><div><strong>${escapeHtml(c.icon || "")} ${escapeHtml(c.name)}</strong><small>${typeLabel(c.type)} · 用于报表占比</small></div><button class="mini" data-action="delete-category" data-id="${escapeAttr(c.id)}">删除</button></div>`; }
   function planItem(p) { const id = escapeAttr(p.id); return `<div class="item"><div><strong>${escapeHtml(p.name)}</strong><small>${p.date} · ${PLAN_REPEATS[p.repeat] || "不重复"} · ${PLAN_STATUSES[p.status] || "待处理"}</small></div><div class="actions"><span>${money(p.amount, p.currency)}</span>${p.status === "pending" ? `<button class="mini primary-mini" data-action="pay-plan" data-id="${id}">记为流水</button><button class="mini" data-action="skip-plan" data-id="${id}">跳过</button>` : `<button class="mini" data-action="reopen-plan" data-id="${id}">恢复</button>`}<button class="mini" data-action="delete-plan" data-id="${id}">删除</button></div></div>`; }
   function quickManageItem(q) { return `<div class="item"><div><strong>${escapeHtml(q.name)}</strong><small>${typeLabel(q.type)}${q.amount ? ` · ${money(q.amount)}` : ""}</small></div><button class="mini" data-action="delete-quick" data-id="${escapeAttr(q.id)}">删除</button></div>`; }
@@ -369,19 +472,30 @@
   function choice(label, type, active, icon, hint) { return `<button class="choice ${active ? "active" : ""}" data-choice="${type}" type="button"><i>${String(icon).startsWith("i-") ? svg(icon) : icon}</i><span>${label}</span><small>${hint}</small></button>`; }
   function typePill(type) { return `<span class="pill ${type}">${typeLabel(type)}</span>`; }
   function typeLabel(type) { return { all: "", income: "收入", expense: "支出", transfer: "还款", exchange: "购汇", fee: "手续费", installment: "分期" }[type] || "支出"; }
-  function accountLine(t) { const a = accountById(t.accountId)?.name || "未知账户"; const b = accountById(t.targetAccountId)?.name; return b ? `${a} → ${b}` : a; }
+  function accountLine(t) { const a = accountDisplayName(accountById(t.accountId)) || "未知账户"; const b = accountDisplayName(accountById(t.targetAccountId)); return b ? `${a} → ${b}` : a; }
   function transferLabel(t) { return t.type === "transfer" ? "信用卡还款" : t.type === "exchange" ? "购汇" : t.type === "fee" ? "手续费" : "未分类"; }
   function amountClass(t) { if (t.type === "income") return "income"; if (t.type === "transfer" || t.type === "exchange") return "debt"; return "expense"; }
   function signedAmount(t) { const sign = t.type === "income" ? "+" : t.type === "expense" || t.type === "fee" ? "-" : ""; return `${sign}${money(t.amount, t.currency || BASE_CURRENCY)}`; }
-  function newDraft(type) { const accountId = preferredAccount(type); const account = accountById(accountId); const target = type === "transfer" ? orderedAccounts().find((a) => a.type === "credit") : type === "exchange" ? account : null; return { type, amount: "", date: toDate(new Date()), accountId, targetAccountId: target?.id || "", currency: account?.currencies[0] || BASE_CURRENCY, targetCurrency: target?.currencies[0] || BASE_CURRENCY, targetAmount: "", feeAmount: "", feeCurrency: account?.currencies[0] || BASE_CURRENCY, categoryId: state?.categories?.find((c) => c.type === (type === "income" ? "income" : "expense"))?.id || "", note: (localStorage.getItem(`${STORAGE_KEY}:last-note`) || "").slice(0, 80), firstDate: toDate(new Date()), installmentCount: 3 }; }
+  function newDraft(type) { const accountId = preferredAccount(type); const account = accountById(accountId); const target = type === "transfer" ? orderedAccounts().find((a) => a.type === "credit") : type === "exchange" ? account : null; return { type, amount: "", date: toDate(new Date()), accountId, targetAccountId: target?.id || "", currency: account?.currencies[0] || BASE_CURRENCY, targetCurrency: target?.currencies[0] || BASE_CURRENCY, targetAmount: "", feeAmount: "", feeCurrency: account?.currencies[0] || BASE_CURRENCY, categoryId: state?.categories?.find((c) => c.type === (type === "income" ? "income" : "expense"))?.id || "", note: "", firstDate: toDate(new Date()), installmentCount: 3 }; }
   function preferredAccount(type) { const stored = localStorage.getItem(`${STORAGE_KEY}:last-account`); const eligible = (a) => type === "installment" ? a.type === "credit" : type === "transfer" ? a.type !== "credit" : true; if (state?.accounts?.some((a) => a.id === stored && eligible(a))) return stored; return orderedAccounts().find(eligible)?.id || state?.accounts?.[0]?.id || ""; }
   function upsert(collection, item) { const index = state[collection].findIndex((x) => x.id === item.id); if (index >= 0) state[collection][index] = item; else state[collection].push(item); }
   function accountById(id) { return state.accounts.find((a) => a.id === id); }
-  function orderedAccounts() { return state.accounts.slice().sort((a, b) => accountTypeRank(a.type) - accountTypeRank(b.type) || a.bank.localeCompare(b.bank, "zh-CN") || a.order - b.order || a.name.localeCompare(b.name, "zh-CN")); }
-  function accountGroupsHtml(mode) { const groups = orderedAccounts().reduce((result, account) => { const key = `${account.type}|${account.bank}`; (result[key] ||= []).push(account); return result; }, {}); return Object.values(groups).map((accounts) => `<section class="account-group"><div class="account-group-title"><span>${ACCOUNT_TYPES[accounts[0].type]}</span><strong>${escapeHtml(accounts[0].bank || "未归类机构")}</strong><small>${accounts.length} 个账户</small></div><div class="list">${accounts.map((account) => mode === "manage" ? accountManageItem(account) : accountAssetItem(account)).join("")}</div></section>`).join("") || empty("暂无账户"); }
-  function accountDisplayName(account) { return account ? `${account.bank ? `${account.bank} · ` : ""}${account.name}${account.tail ? ` (${account.tail})` : ""}` : ""; }
+  function orderedAccounts() { return state.accounts.slice().sort((a, b) => accountTypeRank(a.type) - accountTypeRank(b.type) || a.bankOrder - b.bankOrder || a.order - b.order || a.bank.localeCompare(b.bank, "zh-CN") || a.name.localeCompare(b.name, "zh-CN")); }
+  function bankGroupsForType(type) {
+    const groups = new Map(); orderedAccounts().filter((account) => account.type === type).forEach((account) => { if (!groups.has(account.bank)) groups.set(account.bank, []); groups.get(account.bank).push(account); });
+    return [...groups.entries()].map(([bank, accounts]) => ({ bank, accounts }));
+  }
+  function accountGroupsHtml(mode) {
+    const types = [...new Set(orderedAccounts().map((account) => account.type))];
+    return types.map((type) => { const banks = bankGroupsForType(type); return `<section class="account-type-group"><div class="account-type-title"><span>${ACCOUNT_TYPES[type]}</span><small>${banks.reduce((sum, group) => sum + group.accounts.length, 0)} 个账户</small></div>${banks.map((group, index) => `<section class="account-bank-group"><div class="account-bank-title"><strong>${escapeHtml(group.bank || "未归类机构")}</strong><small>${group.accounts.length} 个账户</small>${mode === "manage" ? `<div class="actions"><button class="mini" data-action="move-bank" data-type="${escapeAttr(type)}" data-bank="${escapeAttr(group.bank)}" data-direction="-1" ${index <= 0 ? "disabled" : ""}>上移银行</button><button class="mini" data-action="move-bank" data-type="${escapeAttr(type)}" data-bank="${escapeAttr(group.bank)}" data-direction="1" ${index >= banks.length - 1 ? "disabled" : ""}>下移银行</button></div>` : ""}</div><div class="list">${group.accounts.map((account) => mode === "manage" ? accountManageItem(account) : accountAssetItem(account)).join("")}</div></section>`).join("")}</section>`; }).join("") || empty("暂无账户");
+  }
+  function accountLabel(account) { return account ? `${account.name}${account.tail ? ` · ${account.tail}` : ""}` : ""; }
+  function accountDisplayName(account) { return accountLabel(account); }
   function bankNames() { return [...new Set(state.accounts.map((account) => account.bank).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN")); }
+  function normalizeBankOrders(accounts) { const groups = new Map(); accounts.forEach((account) => { const key = `${account.type}|${account.bank}`; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(account); }); groups.forEach((items) => { const bankOrder = Math.min(...items.map((item) => Number(item.bankOrder) || 0)); items.forEach((item) => item.bankOrder = bankOrder); }); }
+  function nextBankOrder(type, bank) { const existing = state.accounts.find((account) => account.type === type && account.bank === bank); return existing ? existing.bankOrder : Math.max(-1, ...state.accounts.filter((account) => account.type === type).map((account) => Number(account.bankOrder) || 0)) + 1; }
   function nextAccountOrder(type, bank) { return Math.max(-1, ...state.accounts.filter((account) => account.type === type && account.bank === bank).map((account) => Number(account.order) || 0)) + 1; }
+  function futureInstallmentDebtByAccount(accountId) { const result = {}; state.installments.filter((item) => !item.ended && item.accountId === accountId).forEach((item) => Array.from({ length: item.count }, (_, index) => { const period = index + 1; const generated = state.transactions.some((transaction) => transaction.id === `${item.id}-p-${period}`); if (!generated && !item.skippedPeriods.includes(period)) result[item.currency] = round((result[item.currency] || 0) + installmentPrincipal(item, index) + installmentFee(item, index)); })); return result; }
   function newAccountForm() { return { name: "", type: "debit", bank: "", tail: "", note: "", currencies: [BASE_CURRENCY], initialBalances: { CNY: 0 }, billDay: "", dueDay: "", creditLimit: 0 }; }
   function feeCategory() { return state.categories.find((category) => category.type === "expense" && category.name === "手续费") || expenseCategory(); }
   function accountTypeRank(type) { const index = ["cash", "debit", "credit", "wallet", "other"].indexOf(type); return index < 0 ? 99 : index; }

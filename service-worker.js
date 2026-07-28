@@ -1,8 +1,8 @@
-const CACHE_NAME = "e-account-v12";
+const CACHE_NAME = "e-account-v15";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=20260727-dock",
+  "./styles.css?v=20260728-submit-bar",
   "./app.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",

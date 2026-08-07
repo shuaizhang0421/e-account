@@ -1384,6 +1384,9 @@ canvas { width: 100%; min-width: 420px; height: 260px; display: block; }
   background: linear-gradient(118deg, rgba(236, 248, 255, .82), rgba(247, 243, 255, .70));
 }
 .repayment-allocation.empty { color: var(--muted); }
+.full-balance-repayment { display: grid; gap: 7px; color: #315d83; border-color: #9ecbff; background: linear-gradient(135deg, rgba(227, 243, 255, .96), rgba(235, 234, 255, .84)); }
+.full-balance-repayment strong { color: #1768d6; font-size: 15px; }
+.full-balance-repayment small { color: var(--muted); }
 .advance-repayment { display: grid; gap: 7px; color: #315d83; background: linear-gradient(120deg, rgba(229, 250, 255, .88), rgba(242, 238, 255, .78)); }
 .advance-repayment strong { color: #1e78d7; font-size: 15px; }
 .advance-repayment small { color: var(--muted); }

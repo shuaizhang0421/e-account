@@ -1,8 +1,8 @@
-const CACHE_NAME = "e-account-v19";
+const CACHE_NAME = "e-account-v20";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=20260801-advance-repayment",
+  "./styles.css?v=20260808-full-balance-repayment",
   "./app.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
